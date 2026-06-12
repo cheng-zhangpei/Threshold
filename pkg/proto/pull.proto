@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package proxy;
+
+option go_package = "Threshold/pkg/proto/pb";
+
+// ============================================================
+// PullRequest / ApprovedMessage
+// 定义 OpenStack 侧拉取已通过校验消息的请求和响应。
+// PullApproved 是一个双向流 RPC：
+//   - 客户端持续发送 PullRequest，指定 subscriber_id 和 batch_size
+//   - 服务端逐批返回 ApprovedMessage，队列为空时流结束
+// ============================================================
+
+// PullRequest OpenStack 侧拉取已通过的消息
+message PullRequest {
+    // subscriber_id 拉取方唯一标识，用于区分不同的下游消费者
+    string subscriber_id = 1;
+
+    // batch_size 单次拉取的最大消息数量，服务端按此上限返回
+    int32 batch_size = 2;
+
+    // timestamp 拉取请求发起时间戳（Unix 毫秒）
+    int64 timestamp = 3;
+}
+
+// ApprovedMessage 服务端返回的已通过校验的消息
+// 包含原始请求和响应，以及决策引擎的判定结果，
+// 供 OpenStack 侧进行后续处理（如审计日志、操作执行）。
+message ApprovedMessage {
+    // message_id 消息唯一标识，用于去重和幂等处理
+    string message_id = 1;
+
+    // connection_id 该消息对应的连接标识
+    string connection_id = 2;
+
+    // raw_http_request 原始 HTTP 请求字节流
+    bytes raw_http_request = 3;
+
+    // raw_http_response 服务端转发后的 HTTP 响应字节流
+    bytes raw_http_response = 4;
+
+    // decision_action 决策引擎的动作类型（ALLOW / AUDIT / ALERT 等）
+    string decision_action = 5;
+
+    // decision_reason 决策原因描述，便于审计追溯
+    string decision_reason = 6;
+
+    // timestamp 消息生成时间戳（Unix 毫秒）
+    int64 timestamp = 7;
+}

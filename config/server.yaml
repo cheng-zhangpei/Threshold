@@ -1,0 +1,37 @@
+# Threshold 安全代理 - 服务端配置
+
+grpc:
+  listen_addr: ":50051"
+  rate_limit: 1000      # 令牌桶每秒产生令牌数
+  bucket_size: 2000     # 令牌桶容量
+
+router:
+  operation_risk_file: ""  # 空则使用内置映射表
+
+dispatch:
+  min_workers: 2
+  max_workers: 64
+  scale_up_threshold: 100
+  scale_up_step: 4
+  max_queue_size: 10000
+  idle_timeout_sec: 30
+  health_check_interval_sec: 5
+
+fingerprint:
+  db_path: "data/fingerprint.db"
+
+portrait:
+  db_path: "data/portrait.db"
+  history_limit: 10
+
+output:
+  max_size: 10000
+
+alert: {}
+
+tls:
+  enabled: false
+  cert_file: ""
+  key_file: ""
+  ca_file: ""
+  require_client_auth: false

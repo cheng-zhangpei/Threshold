@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package proxy;
+
+option go_package = "Threshold/pkg/proto/pb";
+
+// ============================================================
+// NotifyRequest / NotifyEvent / EventType
+// 定义下游（OpenStack 侧）订阅实时通知事件的请求和推送内容。
+// SubscribeNotify 是一个服务端单向流 RPC：
+//   - 客户端发送一次 NotifyRequest 完成订阅
+//   - 服务端通过长连接持续推送 NotifyEvent
+// 推送的事件类型包括：连接建立/关闭、设备拉黑、告警触发、扫描请求
+// ============================================================
+
+// NotifyRequest 下游订阅通知的请求
+message NotifyRequest {
+    // subscriber_id 订阅方唯一标识，用于管理订阅生命周期
+    string subscriber_id = 1;
+
+    // events 感兴趣的事件类型列表，为空表示订阅所有事件
+    repeated string events = 2;
+}
+
+// NotifyEvent 服务端推送的通知事件
+// 每个事件携带完整的上下文信息，下游可根据 event_type 分别处理
+message NotifyEvent {
+    // event_id 事件唯一标识，用于去重和幂等处理
+    string event_id = 1;
+
+    // event_type 事件类型，详见 EventType 枚举定义
+    EventType event_type = 2;
+
+    // user_id 关联的用户标识
+    string user_id = 3;
+
+    // connection_id 关联的连接标识（连接事件必填）
+    string connection_id = 4;
+
+    // device_uuid 关联的设备标识（设备拉黑事件必填）
+    string device_uuid = 5;
+
+    // message 人类可读的事件描述，便于日志记录和告警展示
+    string message = 6;
+
+    // timestamp 事件发生时间戳（Unix 毫秒）
+    int64 timestamp = 7;
+
+    // metadata 附加元数据，预留扩展
+    map<string, string> metadata = 8;
+}
+
+// EventType 通知事件类型枚举
+enum EventType {
+    // UNKNOWN 未知事件类型，保留默认值
+    UNKNOWN = 0;
+
+    // CONNECTION_OPENED 新连接建立，通知下游准备接收该用户的消息
+    CONNECTION_OPENED = 1;
+
+    // CONNECTION_CLOSED 连接关闭，通知下游该会话结束
+    CONNECTION_CLOSED = 2;
+
+    // DEVICE_BLACKLISTED 设备被永久拉黑，下游应拒绝该设备的所有后续请求
+    DEVICE_BLACKLISTED = 3;
+
+    // ALERT_TRIGGERED 告警触发，通知管理员监控端关注异常行为
+    ALERT_TRIGGERED = 4;
+
+    // SCAN_REQUESTED 请求 CICD 模块执行镜像沙箱扫描
+    SCAN_REQUESTED = 5;
+}

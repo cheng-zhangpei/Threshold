@@ -1,0 +1,20 @@
+# Threshold 安全代理 - 客户端配置
+
+redirect:
+  local_port: 8080
+  target_host: ""
+  target_port: 0
+
+collector: {}
+
+proxy:
+  listen_addr: ":9090"
+  server_addr: "localhost:50051"
+  device_uuid: ""
+
+tls:
+  enabled: false
+  cert_file: ""
+  key_file: ""
+  ca_file: ""
+  require_client_auth: false

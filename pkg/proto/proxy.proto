@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package proxy;
+
+option go_package = "Threshold/pkg/proto/pb";
+
+import "pkg/proto/pull.proto";
+import "pkg/proto/notify.proto";
+
+// ============================================================
+// SecurityProxy 是安全代理的核心 gRPC 服务
+// 作为客户端本地代理与 OpenStack 之间的安全网关，
+// 负责流量解密、设备身份校验、用户行为评估与访问控制决策。
+// ============================================================
+service SecurityProxy {
+
+    // ----------------------------------------------------------
+    // ProxyStream
+    // 客户端代理通过此双向流发送 HTTP 请求，服务端实时返回决策结果。
+    // 流的生命周期与客户端的一次 TCP 会话绑定：
+    //   客户端调 EstablishConnection -> 建立 ProxyStream -> 调 CloseConnection
+    // ----------------------------------------------------------
+    rpc ProxyStream(stream ProxyRequest) returns (stream ProxyResponse);
+
+    // ----------------------------------------------------------
+    // EstablishConnection
+    // 客户端在发起 ProxyStream 之前调用，携带设备指纹信息，
+    // 服务端校验后返回 connection_id，后续所有请求绑定该连接。
+    // ----------------------------------------------------------
+    rpc EstablishConnection(ConnectionInit) returns (ConnectionAck);
+
+    // ----------------------------------------------------------
+    // CloseConnection
+    // 客户端主动关闭连接时调用，服务端将 ConnectionContext
+    // 通过 WAL 事务持久化，释放内存，通知下游连接已关闭。
+    // ----------------------------------------------------------
+    rpc CloseConnection(ConnectionClose) returns (CloseAck);
+
+    // ----------------------------------------------------------
+    // PullApproved
+    // OpenStack 侧通过此接口拉取通过校验的消息。
+    // 采用双向流实现：客户端持续发送 PullRequest（含 batch_size），
+    // 服务端逐批返回 ApprovedMessage，直到队列为空。
+    // ----------------------------------------------------------
+    rpc PullApproved(stream PullRequest) returns (stream ApprovedMessage);
+
+    // ----------------------------------------------------------
+    // SubscribeNotify
+    // OpenStack 侧调用此接口订阅实时通知事件，
+    // 服务端通过长连接推送连接建立/关闭、设备拉黑、告警等事件。
+    // ----------------------------------------------------------
+    rpc SubscribeNotify(NotifyRequest) returns (stream NotifyEvent);
+}
+
+// ============================================================
+// ProxyRequest 客户端代理发送的请求消息
+// 对应原始 HTTP 请求，由 LocalProxy 附加 X-Proxy-* 指纹字段后
+// 通过 gRPC 流式传输到服务端。
+// ============================================================
+message ProxyRequest {
+    // connection_id 由 EstablishConnection 返回，标识当前会话
+    string connection_id = 1;
+
+    // device_uuid 设备唯一标识，客户端首次启动时采集并持久化
+    string device_uuid = 2;
+
+    // user_id 用户标识
+    string user_id = 3;
+
+    // raw_http_request 原始 HTTP 请求字节流
+    // 包含完整的请求行、头部（含 X-Proxy-* 指纹字段）和请求体
+    bytes raw_http_request = 4;
+
+    // metadata 附加元数据，预留扩展（如链路追踪 ID、请求来源标记等）
+    map<string, string> metadata = 5;
+
+    // timestamp 请求发起时间戳（Unix 毫秒）
+    int64 timestamp = 6;
+}
+
+// ============================================================
+// ProxyResponse 服务端返回给客户端代理的响应消息
+// 客户端根据 status 字段判断请求是否被放行，
+// 并将 raw_http_response 还原为 HTTP 响应交还给原生客户端。
+// ============================================================
+message ProxyResponse {
+    // connection_id 与请求对应的连接标识
+    string connection_id = 1;
+
+    // raw_http_response 服务端处理后的 HTTP 响应字节流
+    bytes raw_http_response = 2;
+
+    // status 决策结果状态码，客户端据此决定是否展示响应
+    Status status = 3;
+
+    // reason 人类可读的决策原因，便于调试和审计
+    string reason = 4;
+}
+
+// Status 决策结果状态码
+enum Status {
+    // OK 请求放行，raw_http_response 中包含正常的 HTTP 响应
+    OK = 0;
+
+    // BLOCKED 请求被阻断，raw_http_response 为空
+    BLOCKED = 1;
+
+    // BLACKLISTED 设备已被拉黑，后续所有请求将被拒绝
+    BLACKLISTED = 2;
+
+    // RATE_LIMITED 请求被限流，客户端应稍后重试
+    RATE_LIMITED = 3;
+}
+
+// ============================================================
+// ConnectionInit 客户端发起连接初始化请求
+// 携带设备指纹信息，服务端据此创建 ConnectionContext
+// 并从 PortraitStore 加载该用户的历史画像摘要。
+// ============================================================
+message ConnectionInit {
+    // user_id 用户标识
+    string user_id = 1;
+
+    // device_uuid 设备唯一标识
+    string device_uuid = 2;
+
+    // ip 客户端 IP 地址
+    string ip = 3;
+
+    // os_type 操作系统类型（linux / windows / macos）
+    string os_type = 4;
+
+    // timestamp 连接发起时间戳（Unix 毫秒）
+    int64 timestamp = 5;
+}
+
+// ============================================================
+// ConnectionAck 服务端对连接初始化的确认响应
+// ============================================================
+message ConnectionAck {
+    // connection_id 服务端分配的连接标识，后续 ProxyStream 中使用
+    string connection_id = 1;
+
+    // accepted 连接是否被接受
+    // false 通常表示设备已被拉黑或指纹校验失败
+    bool accepted = 2;
+
+    // reason 拒绝原因（accepted 为 false 时必填）
+    string reason = 3;
+}
+
+// ============================================================
+// ConnectionClose 客户端请求关闭连接
+// 服务端收到后将 ConnectionContext 持久化到 WAL，
+// 更新用户历史画像摘要，释放内存，并通知下游。
+// ============================================================
+message ConnectionClose {
+    // connection_id 要关闭的连接标识
+    string connection_id = 1;
+
+    // timestamp 关闭时间戳（Unix 毫秒）
+    int64 timestamp = 2;
+}
+
+// ============================================================
+// CloseAck 服务端确认连接已关闭
+// ============================================================
+message CloseAck {
+    // success 关闭操作是否成功
+    bool success = 1;
+}
