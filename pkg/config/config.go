@@ -8,7 +8,6 @@ import (
 
 // ============================================================
 // ServerConfig 服务端配置
-// 从 YAML 文件加载，包含 gRPC 接入层、路由、调度、存储等所有组件的参数。
 // ============================================================
 
 type ServerConfig struct {
@@ -22,21 +21,22 @@ type ServerConfig struct {
 	TLS         TLSConfig         `yaml:"tls"`
 }
 
-// GRPCConfig gRPC 接入层配置
 type GRPCConfig struct {
-	ListenAddr string `yaml:"listen_addr"` // 监听地址，如 ":50051"
-	RateLimit  int    `yaml:"rate_limit"`  // 令牌桶每秒产生令牌数
-	BucketSize int    `yaml:"bucket_size"` // 令牌桶容量
+	ListenAddr string `yaml:"listen_addr"`
+	RateLimit  int    `yaml:"rate_limit"`
+	BucketSize int    `yaml:"bucket_size"`
 }
 
 // RouterConfig Router 路由配置
 type RouterConfig struct {
-	// OperationRiskFile 静态风险映射表文件路径（YAML/JSON）
-	// 原型阶段使用内置映射，生产阶段从此文件加载
+	// Consumers 消费者 goroutine 数量，决定并发处理能力
+	Consumers int `yaml:"consumers"`
+	// QueueSize 缓冲队列容量，超过则触发背压
+	QueueSize int `yaml:"queue_size"`
+	// OperationRiskFile 静态风险映射表文件路径
 	OperationRiskFile string `yaml:"operation_risk_file"`
 }
 
-// DispatchConfig DispatchManager + WorkerPool 配置
 type DispatchConfig struct {
 	MinWorkers             int `yaml:"min_workers"`
 	MaxWorkers             int `yaml:"max_workers"`
@@ -47,34 +47,28 @@ type DispatchConfig struct {
 	HealthCheckIntervalSec int `yaml:"health_check_interval_sec"`
 }
 
-// FingerprintConfig 指纹匹配引擎配置
 type FingerprintConfig struct {
-	DBPath string `yaml:"db_path"` // bbolt 数据库文件路径
+	DBPath string `yaml:"db_path"`
 }
 
-// PortraitConfig 用户画像存储配置
 type PortraitConfig struct {
-	DBPath       string `yaml:"db_path"`       // bbolt 数据库文件路径
-	HistoryLimit int    `yaml:"history_limit"` // 加载最近 N 次连接摘要
+	DBPath       string `yaml:"db_path"`
+	HistoryLimit int    `yaml:"history_limit"`
 }
 
-// OutputConfig OutputBuffer 配置
 type OutputConfig struct {
-	MaxSize int `yaml:"max_size"` // 队列最大容量
+	MaxSize int `yaml:"max_size"`
 }
 
-// AlertConfig AlertQueue 配置
 type AlertConfig struct {
-	// 暂无特殊配置，告警推送地址由 gRPC 连接决定
 }
 
-// TLSConfig TLS/mTLS 配置
 type TLSConfig struct {
-	Enabled           bool   `yaml:"enabled"`             // 是否启用 TLS
-	CertFile          string `yaml:"cert_file"`           // 服务端证书路径
-	KeyFile           string `yaml:"key_file"`            // 服务端私钥路径
-	CAFile            string `yaml:"ca_file"`             // CA 证书路径（mTLS 时使用）
-	RequireClientAuth bool   `yaml:"require_client_auth"` // 是否要求客户端证书（mTLS）
+	Enabled           bool   `yaml:"enabled"`
+	CertFile          string `yaml:"cert_file"`
+	KeyFile           string `yaml:"key_file"`
+	CAFile            string `yaml:"ca_file"`
+	RequireClientAuth bool   `yaml:"require_client_auth"`
 }
 
 // ============================================================
@@ -88,28 +82,20 @@ type ClientConfig struct {
 	TLS       TLSConfig       `yaml:"tls"`
 }
 
-// RedirectConfig 重定向模块配置
 type RedirectConfig struct {
-	LocalPort  int    `yaml:"local_port"`  // 本地代理监听端口
-	TargetHost string `yaml:"target_host"` // OpenStack 服务端地址
-	TargetPort int    `yaml:"target_port"` // OpenStack 服务端端口
+	LocalPort  int    `yaml:"local_port"`
+	TargetHost string `yaml:"target_host"`
+	TargetPort int    `yaml:"target_port"`
 }
 
-// CollectorConfig 行为采集器配置
 type CollectorConfig struct {
-	// 暂无特殊配置，后续可扩展采集策略
 }
 
-// ProxyConfig 本地代理配置
 type ProxyConfig struct {
-	ListenAddr string `yaml:"listen_addr"` // 本地代理监听地址
-	ServerAddr string `yaml:"server_addr"` // 安全代理服务端地址
-	DeviceUUID string `yaml:"device_uuid"` // 设备 UUID（首次启动时自动采集）
+	ListenAddr string `yaml:"listen_addr"`
+	ServerAddr string `yaml:"server_addr"`
+	DeviceUUID string `yaml:"device_uuid"`
 }
-
-// ============================================================
-// LoadServerConfig 从 YAML 文件加载服务端配置
-// ============================================================
 
 func LoadServerConfig(path string) (*ServerConfig, error) {
 	data, err := os.ReadFile(path)
@@ -123,10 +109,6 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	return cfg, nil
 }
 
-// ============================================================
-// LoadClientConfig 从 YAML 文件加载客户端配置
-// ============================================================
-
 func LoadClientConfig(path string) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -139,13 +121,16 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 	return cfg, nil
 }
 
-// DefaultServerConfig 返回服务端默认配置
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
 		GRPC: GRPCConfig{
 			ListenAddr: ":50051",
 			RateLimit:  1000,
 			BucketSize: 2000,
+		},
+		Router: RouterConfig{
+			Consumers: 4,
+			QueueSize: 4096,
 		},
 		Dispatch: DispatchConfig{
 			MinWorkers:             2,
@@ -172,7 +157,6 @@ func DefaultServerConfig() *ServerConfig {
 	}
 }
 
-// DefaultClientConfig 返回客户端默认配置
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		Redirect: RedirectConfig{

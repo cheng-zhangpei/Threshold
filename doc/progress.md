@@ -350,36 +350,172 @@ ProxyStream 完整流水线：
 
 ---
 
-## 当前数据流（完整）
-
-    Client 发送 ProxyRequest
-        |
-        v
-    EstablishConnection:
-        1. 校验 user_id / device_uuid 非空
-        2. FingerprintTree.Match 设备白名单
-           -> 不匹配：拒绝建立连接
-        3. 创建 ConnectionContext 存入内存
-        4. 返回 connection_id
-    
-    ProxyStream:
-        1. ParseProxyRequest -> ParsedRequest
-           (解析 raw_http_request + 提取指纹 + 拼接 OpKey)
-        2. FingerprintTree.Match 请求级指纹校验
-           -> 不匹配：返回 BLOCKED
-        3. RecordEvent -> 追加事件到 ConnectionContext
-        4. Engine.Evaluate(ctx, history, riskLevel)
-           -> 遍历 DECISION_RULES，命中第一条即停
-           -> R99 兜底按风险等级分派
-        5. 映射 Decision.Action 到 ProxyResponse.Status
-        6. 返回 ProxyResponse 给客户端
-    
-    CloseConnection:
-        1. 释放 ConnectionContext
-        2. TODO: WAL 持久化 -> PortraitStore
-        3. TODO: 通知下游 Subscribers
 
 ---
+
+## Day 4：OutputBuffer + AlertQueue + Router
+
+### 目标
+
+消息缓冲和告警队列就绪，Router 能分级路由。
+
+### Router 模块 (server/router/)
+
+| 文件 | 说明 |
+|------|------|
+| risk_level.go | IsReadOp() / ClassifyByMethod() 基础分类 |
+| operation_risk.go | OperationRiskTable 精确映射 + 通配符预编译，默认 L1 |
+| router.go | Router + Dispatcher 接口，事件消费型，多消费者 |
+| router_test.go | 13 个测试 |
+
+Router 设计：
+- 事件消费模型：buffered channel + N 个 consumer goroutine
+- L0 直接穿透到 OutputBuffer，L1+ 委托给 Dispatcher
+- 背压策略：channel 满时 default 分支返回 THROTTLE
+- 消费者数量通过 config 配置，默认 4 个
+
+### OutputBuffer 增强 (server/output/buffer.go)
+
+- maxSize 容量上限（默认 10000），满自动淘汰最旧消息
+- Subscribe()/Unsubscribe() 订阅者机制，通过 channel 通知下游
+- Pull() 批量拉取并清空
+
+### AlertQueue 增强 (server/alert/queue.go)
+
+- Subscribe(id)/Unsubscribe(id) 按 ID 订阅和注销
+- Put() 时自动通知所有订阅者
+- Drain() 取出并清空
+
+### Day 4 测试用例
+
+| 模块 | 测试数 | 说明 |
+|------|--------|------|
+| server/router | 13 | 精确匹配/通配符/默认值/多消费者/背压/关闭 |
+| server/output | 5 | Put/Pull/MaxSize淘汰/Subscribe通知 |
+| server/alert | 5 | Put/Drain/Subscribe单播/多播/Unsubscribe |
+
+### gRPC 接入层集成
+
+- handler.go 接入 Router：ProxyStream 流水线中用 router.Classify() 替换硬编码 L0
+- PullApproved 实现：双向流，从 OutputBuffer 拉取 ApprovedMessage 批次返回
+- SubscribeNotify 实现：服务端单向流，订阅 AlertQueue 实时推送告警
+
+---
+
+## Day 5：DispatchManager + WorkerPool
+
+### 目标
+
+Worker 竞争消费，弹性伸缩工作正常，溢出持久化保证不丢数据。
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| server/dispatch/taskstore.go | 溢出持久化层，封装 bbolt 读写 + 序列化 |
+| server/dispatch/policy.go | PoolPolicy 弹性伸缩策略配置 |
+| server/dispatch/manager.go | DispatchManager 核心（队列 + 溢出 + monitor_loop） |
+| server/dispatch/worker.go | Worker 竞争消费 + 处理流水线 |
+| server/dispatch/dispatch_test.go | 15 个测试（含决策引擎联调） |
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| pkg/storage/store.go | 新增 BucketDispatchTasks bucket |
+| pkg/types/types.go | Action 新增 String() 方法 |
+| pkg/config/config.go | RouterConfig 新增 Consumers + QueueSize |
+| cmd/server/main.go | 接入 DispatchManager 替换 noopDispatcher |
+| server/grpc/server.go | New() 接收 Router/OutputBuffer/AlertQueue |
+| server/grpc/handler.go | Router 集成 + PullApproved + SubscribeNotify |
+
+### DispatchManager 架构
+
+```
+Router (多 goroutine)
+    |
+Enqueue() <- 非阻塞投递
+    |
++-- 成功 -> memoryQueue (buffered channel) -> WorkerPool
++-- 失败 (队列满) -> TaskStore.Overflow() -> bbolt
+    |
+    +-- 调用者阻塞等待 resultCh
+    |
+    +-- monitor_loop 定期回捞
+         |
+         +-- queue 空闲 -> TaskStore.Reload() -> 取回 pending resultCh
+              -> 投递到 queue -> Worker 处理 -> 写回 resultCh
+```
+
+### 弹性伸缩策略
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| MinWorkers | 2 | 最小 Worker 数 |
+| MaxWorkers | 64 | 最大 Worker 数 |
+| ScaleUpThreshold | 100 | 队列深度超过此值触发扩容 |
+| ScaleUpStep | 4 | 每次扩容增加的 Worker 数 |
+| ScaleDownThreshold | 20 | 队列深度低于此值触发缩容 |
+| MaxQueueSize | 10000 | 内存队列最大容量 |
+| ReloadSize | 4000 | 队列低于此值触发回捞 |
+| ReloadBatch | 500 | 每次回捞批次大小 |
+
+### 背压与级联防护
+
+| 层级 | 机制 | 效果 |
+|------|------|------|
+| Router 层 | buffered channel + default 背压 | Router 不被阻塞 |
+| DispatchManager 层 | 溢出到 bbolt | 队列满不丢数据 |
+| Worker 层 | 弹性扩容 | 自动增加 Worker |
+| 存储层 | bbolt 持久化 | 跨重启不丢数据 |
+
+### Day 5 测试用例
+
+| 类别 | 测试数 | 说明 |
+|------|--------|------|
+| TaskStore 持久化 | 3 | 溢出写入 / 回捞 / Cleanup / PendingCount |
+| DispatchManager 基础 | 4 | 单任务 / 100 并发 / 溢出 / 弹性扩缩 |
+| 决策引擎联调 | 8 | R99 三级风险 / R07 / R08 / 溢出决策一致性 |
+
+---
+
+## Day 8：端到端集成测试
+
+### 目标
+
+启动真实 server，用 gRPC client 端到端测试完整数据流。
+
+### 集成测试用例 (cmd/server/main_test.go)
+
+| 测试 | 验证 |
+|------|------|
+| EstablishConnection | 设备指纹匹配 -> 连接建立成功 |
+| EstablishConnection_Rejected | 未注册设备 -> 被拒绝 |
+| ProxyStream_GET_L0 | GET -> L0 -> OutputBuffer -> OK |
+| ProxyStream_DELETE_L2 | DELETE -> L2 -> 决策引擎 -> OK |
+| ProxyStream_FingerprintMismatch | 指纹不符 -> BLOCKED |
+| PullApproved | 3 个 GET -> OutputBuffer -> 拉取 3 条 ApprovedMessage |
+| CloseConnection | 连接关闭成功 |
+| ConcurrentProxyStream | 20 并发 gRPC 流 -> 全部 OK |
+
+### 数据流（完整）
+
+```
+Client gRPC 请求
+    |
+gRPC Handler (指纹校验)
+    |
+Router (L0/L1/L2/L3 静态分级)
+    |
++-- L0 -> OutputBuffer (直接穿透)
++-- L1+ -> DispatchManager -> WorkerPool -> Decision Engine
+              |
+         +-- ALLOW/AUDIT -> OutputBuffer
+         +-- BLOCK/ALERT -> AlertQueue
+              |
+         OutputBuffer -> PullApproved (下游拉取)
+         AlertQueue -> SubscribeNotify (主动推送)
+```
 
 ## 测试覆盖汇总
 
@@ -389,11 +525,14 @@ ProxyStream 完整流水线：
 | pkg/storage | 5 | PASS | WAL 事务/崩溃恢复 |
 | server/fingerprint | 9 | PASS | 指纹树匹配/注册/注销/持久化 |
 | server/decision | 7 | PASS | 决策引擎规则匹配 |
-| **总计** | **24** | **ALL PASS** | |
+| server/output | 5 | PASS | OutputBuffer 读写/订阅 |
+| server/alert | 5 | PASS | AlertQueue 读写/订阅 |
+| server/router | 13 | PASS | Router 分级/多消费者/背压 |
+| server/dispatch | 15 | PASS | DispatchManager 溢出/弹性伸缩/联调 |
+| cmd/server | 8 | PASS | 端到端集成测试 |
+| **总计** | **70** | **ALL PASS** | |
 
----
-
-## 项目当前文件统计
+## 项目文件统计
 
 | 目录 | .go 文件数 | 测试文件 |
 |------|-----------|----------|
@@ -404,22 +543,25 @@ ProxyStream 完整流水线：
 | server/fingerprint | 2 | 1 |
 | server/portrait | 1 | 0 |
 | server/decision | 3 | 1 |
+| server/output | 1 | 1 |
+| server/alert | 1 | 1 |
+| server/router | 3 | 1 |
+| server/dispatch | 4 | 1 |
 | server/grpc | 3 | 0 |
-| cmd/server | 1 | 0 |
+| server/crossdevice | 1 | 0 |
+| cmd/server | 2 | 1 |
 | cmd/client | 1 | 0 |
-| **总计** | **24** | **4** |
+| **总计** | **31** | **9** |
 
----
+## 待完成（Day 6-8）
 
-## 待完成（Day 4-8）
-
-| Day | 内容 | 预计产出 |
-|-----|------|----------|
-| 4 | OutputBuffer + AlertQueue + Router | 消息缓冲/告警队列/风险分级映射表 |
-| 5 | DispatchManager + WorkerPool | 弹性伸缩/竞争消费/Worker 处理流水线 |
-| 6 | gRPC 接入层完善 + 跨设备接口 | 限流拦截器/跨设备关联接口定义 |
-| 7 | Client 端实现 | 重定向模块/行为采集/本地代理 |
-| 8 | 端到端集成 + 配置加载 | 完整 main.go/配置驱动/端到端测试 |
+| Day | 内容 | 状态 |
+|-----|------|------|
+| 4 | OutputBuffer + AlertQueue + Router | 已完成 |
+| 5 | DispatchManager + WorkerPool | 已完成 |
+| 6 | gRPC 接入层完善 + 跨设备接口 | 待实现 |
+| 7 | Client 端实现 | 待实现 |
+| 8 | 端到端集成 | 已完成 |
 
 ### 后续完善项
 
@@ -430,3 +572,7 @@ ProxyStream 完整流水线：
 - PortraitStore 历史画像加载/追加（目前空实现）
 - ConnectionContext 关闭时通过 WAL 持久化到 PortraitStore
 - CloseConnection 通知下游 Subscribers
+- gRPC 限流拦截器（Day 6）
+- 跨设备关联接口（Day 6）
+
+详见 dispatch.md 获取 DispatchManager 模块的详细设计文档。
