@@ -1,4 +1,4 @@
-﻿﻿# Threshold 安全代理 - Go 项目框架结构
+# Threshold 安全代理 - Go 项目框架结构
 
 ## 1. 项目概述
 
@@ -12,15 +12,15 @@ Threshold 是一个安全代理系统，由 **Client（本地代理）** 和 **S
 | 设备指纹附加 | Client | 六维指纹（UUID/OS/IP/Port/Protocol/Reserved） |
 | 行为事件采集 | Client | 记录操作事件，生成 OpTag |
 | gRPC 加密传输 | Client↔Server | mTLS 双向认证通道 |
-| 令牌桶限流 | Server | 全局流量闸门 |
+| 令牌桶限流 | Server | TokenBucket 令牌桶 + gRPC 拦截器链 |
 | L0-L3 静态风险分级 | Server | 按操作类型判定风险等级 |
 | 六层Hash树指纹匹配 | Server | 校验设备合法性 |
 | 弹性伸缩 WorkerPool | Server | 按需调整并发处理能力 |
-| 连接粒度用户画像 | Server | 行为历史记录 + 跨连接关联 |
+| 连接粒度用户画像 | Server | ConnectionSummary + UserProfile 聚合 + RiskScore 复合评分 |
 | 声明式决策引擎 | Server | DECISION_RULES 命中即停匹配 |
 | OutputBuffer | Server | 通过校验的消息暂存 + 通知下游拉取 |
 | AlertQueue | Server | 告警暂存 + 设备拉黑 |
-| 跨设备关联画像接口 | Server | 仅定义接口，算法后续迭代 |
+| 跨设备关联画像接口 | Server | Correlator 接口 + SimpleCorrelator 实现 |
 
 ### 不在本项目范围
 
@@ -78,7 +78,7 @@ r
 │   │   ├── interceptor.go              # 限流拦截器、日志拦截器
 r
 │   │   ├── ratelimit.go                # TokenBucketLimiter 令牌桶限流
-│   │   └── grpc_test.go               # 集成测试
+│   │   └── interceptor_test.go         # 单元测试 (4 tests, -race)
 │   ├── router/                         # Router 风险分级
 │   │   ├── router.go                   # Router 核心逻辑：提取 op_key，查映射表，L0 穿透 / L1+ 入队
 │   │   ├── operation_risk.go           # OperationRiskTable：静态映射表 + 通配符正则匹配
@@ -104,7 +104,8 @@ r
 │   │   └── portrait_test.go           # 单元测试
 │   ├── decision/                       # 决策引擎
 │   │   ├── engine.go                   # evaluate_rules：遍历 DECISION_RULES，命中第一条即停
-│   │   ├── rules.go                    # DECISION_RULES 定义（R01-R12）
+│   │   ├── rules.go                    # DECISION_RULES（R01-R10 + R99），R04/R05 为画像规则
+│   │   ├── read_ops.go                 # READ_OPS 只读操作集合
 │   │   ├── actions.go                  # Decision / Action 常量定义
 │   │   ├── read_ops.go                 # READ_OPS 只读操作集合
 │   │   └── decision_test.go           # 单元测试

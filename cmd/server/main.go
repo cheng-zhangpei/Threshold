@@ -90,7 +90,7 @@ func main() {
 	fmt.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
 
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, outputBuf, alertQueue)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, outputBuf, alertQueue, ps)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)

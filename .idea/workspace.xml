@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="988503e3-ec3a-4e71-b171-1fb6383de2e9" name="Changes" comment="the dispatchManager, worker pool, decision engine finished">
+      <change beforePath="$PROJECT_DIR$/client/collector/collector.go" beforeDir="false" afterPath="$PROJECT_DIR$/client/collector/collector.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/proxy/proxy.go" beforeDir="false" afterPath="$PROJECT_DIR$/client/proxy/proxy.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client/redirect/redirect.go" beforeDir="false" afterPath="$PROJECT_DIR$/client/redirect/redirect.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cmd/client/main.go" beforeDir="false" afterPath="$PROJECT_DIR$/cmd/client/main.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cmd/server/main.go" beforeDir="false" afterPath="$PROJECT_DIR$/cmd/server/main.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/framework.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/framework.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/progress.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/progress.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/proto/pb/proxy.pb.go" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/proto/pb/proxy.pb.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/proto/pb/proxy_grpc.pb.go" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/proto/pb/proxy_grpc.pb.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/proto/proxy.proto" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/proto/proxy.proto" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/storage/store.go" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/storage/store.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/crossdevice/correlator.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/crossdevice/correlator.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/decision/rules.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/decision/rules.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/grpc/handler.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/grpc/handler.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/grpc/server.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/grpc/server.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/portrait/store.go" beforeDir="false" afterPath="$PROJECT_DIR$/server/portrait/store.go" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="GOROOT" url="file://$PROJECT_DIR$/../../go_language/go1.25.10" />
+  <component name="Git.Settings">
+    <option name="PUSH_AUTO_UPDATE" value="true" />
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;cheng-zhangpei&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/cheng-zhangpei/Threshold.git&quot;,
+    &quot;accountId&quot;: &quot;31e2263e-95bb-480e-98ad-3516b6c575b8&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 4
+}</component>
+  <component name="ProjectId" id="3F144CMHX3uO9iQ69Xb72ZooTzk" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "Go Test.TestIntegration_ConcurrentProxyStream in Threshold/cmd/server (1).executor": "Run",
+    "Go Test.TestIntegration_ConcurrentProxyStream in Threshold/cmd/server.executor": "Run",
+    "Go Test.TestWAL_BeginCommit in Threshold/pkg/storage.executor": "Run",
+    "Go Test.TestWAL_Delete in Threshold/pkg/storage.executor": "Run",
+    "Go Test.fingerprint_test.go.executor": "Run",
+    "Go Test.go test Threshold/cmd/server.executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.GoLinterPluginOnboarding": "true",
+    "RunOnceActivity.GoLinterPluginStorageMigration": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.go.formatter.settings.were.checked": "true",
+    "RunOnceActivity.go.migrated.go.modules.settings": "true",
+    "RunOnceActivity.go.modules.go.list.on.any.changes.was.set": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "git-widget-placeholder": "main",
+    "go.import.settings.migrated": "true",
+    "last_opened_file_path": "A:/personal_project/Threshold",
+    "node.js.detected.package.eslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "onboarding.tips.debug.path": "A:/personal_project/Threshold/main.go"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="A:\personal_project\Threshold\doc" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Go Test.TestIntegration_ConcurrentProxyStream in Threshold/cmd/server (1)">
+    <configuration name="go build tree.go" type="GoApplicationRunConfiguration" factoryName="Go Application" temporary="true" nameIsGenerated="true">
+      <module name="Threshold" />
+      <working_directory value="$PROJECT_DIR$" />
+      <kind value="FILE" />
+      <package value="Threshold" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$/server/fingerprint/tree.go" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestIntegration_ConcurrentProxyStream in Threshold/cmd/server (1)" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="Threshold" />
+      <working_directory value="$PROJECT_DIR$/cmd/server" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="Threshold/cmd/server" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestIntegration_ConcurrentProxyStream\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestIntegration_ConcurrentProxyStream in Threshold/cmd/server" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="Threshold" />
+      <working_directory value="$PROJECT_DIR$/cmd/server" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="Threshold/cmd/server" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestIntegration_ConcurrentProxyStream\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="fingerprint_test.go" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="Threshold" />
+      <working_directory value="$PROJECT_DIR$/server/fingerprint" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="FILE" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$/server/fingerprint/fingerprint_test.go" />
+      <framework value="gotest" />
+      <method v="2" />
+    </configuration>
+    <configuration name="go test Threshold/cmd/server" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="Threshold" />
+      <working_directory value="$PROJECT_DIR$/cmd/server" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="Threshold/cmd/server" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Go Test.TestIntegration_ConcurrentProxyStream in Threshold/cmd/server (1)" />
+        <item itemvalue="Go Test.go test Threshold/cmd/server" />
+        <item itemvalue="Go Test.TestIntegration_ConcurrentProxyStream in Threshold/cmd/server" />
+        <item itemvalue="Go Test.fingerprint_test.go" />
+        <item itemvalue="Go Build.go build tree.go" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-gosdk-3b128438d3f6-07d2d2d66b1e-org.jetbrains.plugins.go.sharedIndexes.bundled-GO-251.29188.14" />
+        <option value="bundled-js-predefined-d6986cc7102b-09060db00ec0-JavaScript-GO-251.29188.14" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="988503e3-ec3a-4e71-b171-1fb6383de2e9" name="Changes" comment="" />
+      <created>1781229048060</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1781229048060</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="first commit" />
+    <MESSAGE value="framework and the fingerprint module" />
+    <MESSAGE value="the dispatchManager, worker pool, decision engine finished" />
+    <option name="LAST_COMMIT_MESSAGE" value="the dispatchManager, worker pool, decision engine finished" />
+  </component>
+  <component name="VgoProject">
+    <settings-migrated>true</settings-migrated>
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" type="DlvLineBreakpoint">
+          <url>file://$PROJECT_DIR$/server/router/router.go</url>
+          <line>13</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+</project>

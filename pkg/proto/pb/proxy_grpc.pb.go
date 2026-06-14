@@ -24,6 +24,9 @@ const (
 	SecurityProxy_CloseConnection_FullMethodName     = "/proxy.SecurityProxy/CloseConnection"
 	SecurityProxy_PullApproved_FullMethodName        = "/proxy.SecurityProxy/PullApproved"
 	SecurityProxy_SubscribeNotify_FullMethodName     = "/proxy.SecurityProxy/SubscribeNotify"
+	SecurityProxy_RegisterDevice_FullMethodName      = "/proxy.SecurityProxy/RegisterDevice"
+	SecurityProxy_UnregisterDevice_FullMethodName    = "/proxy.SecurityProxy/UnregisterDevice"
+	SecurityProxy_ListDevices_FullMethodName         = "/proxy.SecurityProxy/ListDevices"
 )
 
 // SecurityProxyClient is the client API for SecurityProxy service.
@@ -70,6 +73,12 @@ type SecurityProxyClient interface {
 	// 服务端通过长连接推送连接建立/关闭、设备拉黑、告警等事件。
 	// ----------------------------------------------------------
 	SubscribeNotify(ctx context.Context, in *NotifyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[NotifyEvent], error)
+	// ----------------------------------------------------------
+	// Admin: Device management
+	// ----------------------------------------------------------
+	RegisterDevice(ctx context.Context, in *RegisterDeviceRequest, opts ...grpc.CallOption) (*RegisterDeviceResponse, error)
+	UnregisterDevice(ctx context.Context, in *UnregisterDeviceRequest, opts ...grpc.CallOption) (*UnregisterDeviceResponse, error)
+	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
 }
 
 type securityProxyClient struct {
@@ -145,6 +154,36 @@ func (c *securityProxyClient) SubscribeNotify(ctx context.Context, in *NotifyReq
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type SecurityProxy_SubscribeNotifyClient = grpc.ServerStreamingClient[NotifyEvent]
 
+func (c *securityProxyClient) RegisterDevice(ctx context.Context, in *RegisterDeviceRequest, opts ...grpc.CallOption) (*RegisterDeviceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterDeviceResponse)
+	err := c.cc.Invoke(ctx, SecurityProxy_RegisterDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *securityProxyClient) UnregisterDevice(ctx context.Context, in *UnregisterDeviceRequest, opts ...grpc.CallOption) (*UnregisterDeviceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnregisterDeviceResponse)
+	err := c.cc.Invoke(ctx, SecurityProxy_UnregisterDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *securityProxyClient) ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDevicesResponse)
+	err := c.cc.Invoke(ctx, SecurityProxy_ListDevices_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SecurityProxyServer is the server API for SecurityProxy service.
 // All implementations must embed UnimplementedSecurityProxyServer
 // for forward compatibility.
@@ -189,6 +228,12 @@ type SecurityProxyServer interface {
 	// 服务端通过长连接推送连接建立/关闭、设备拉黑、告警等事件。
 	// ----------------------------------------------------------
 	SubscribeNotify(*NotifyRequest, grpc.ServerStreamingServer[NotifyEvent]) error
+	// ----------------------------------------------------------
+	// Admin: Device management
+	// ----------------------------------------------------------
+	RegisterDevice(context.Context, *RegisterDeviceRequest) (*RegisterDeviceResponse, error)
+	UnregisterDevice(context.Context, *UnregisterDeviceRequest) (*UnregisterDeviceResponse, error)
+	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
 	mustEmbedUnimplementedSecurityProxyServer()
 }
 
@@ -213,6 +258,15 @@ func (UnimplementedSecurityProxyServer) PullApproved(grpc.BidiStreamingServer[Pu
 }
 func (UnimplementedSecurityProxyServer) SubscribeNotify(*NotifyRequest, grpc.ServerStreamingServer[NotifyEvent]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeNotify not implemented")
+}
+func (UnimplementedSecurityProxyServer) RegisterDevice(context.Context, *RegisterDeviceRequest) (*RegisterDeviceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterDevice not implemented")
+}
+func (UnimplementedSecurityProxyServer) UnregisterDevice(context.Context, *UnregisterDeviceRequest) (*UnregisterDeviceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnregisterDevice not implemented")
+}
+func (UnimplementedSecurityProxyServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
 }
 func (UnimplementedSecurityProxyServer) mustEmbedUnimplementedSecurityProxyServer() {}
 func (UnimplementedSecurityProxyServer) testEmbeddedByValue()                       {}
@@ -296,6 +350,60 @@ func _SecurityProxy_SubscribeNotify_Handler(srv interface{}, stream grpc.ServerS
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type SecurityProxy_SubscribeNotifyServer = grpc.ServerStreamingServer[NotifyEvent]
 
+func _SecurityProxy_RegisterDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecurityProxyServer).RegisterDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecurityProxy_RegisterDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecurityProxyServer).RegisterDevice(ctx, req.(*RegisterDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SecurityProxy_UnregisterDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecurityProxyServer).UnregisterDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecurityProxy_UnregisterDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecurityProxyServer).UnregisterDevice(ctx, req.(*UnregisterDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SecurityProxy_ListDevices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDevicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecurityProxyServer).ListDevices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecurityProxy_ListDevices_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecurityProxyServer).ListDevices(ctx, req.(*ListDevicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SecurityProxy_ServiceDesc is the grpc.ServiceDesc for SecurityProxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -310,6 +418,18 @@ var SecurityProxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CloseConnection",
 			Handler:    _SecurityProxy_CloseConnection_Handler,
+		},
+		{
+			MethodName: "RegisterDevice",
+			Handler:    _SecurityProxy_RegisterDevice_Handler,
+		},
+		{
+			MethodName: "UnregisterDevice",
+			Handler:    _SecurityProxy_UnregisterDevice_Handler,
+		},
+		{
+			MethodName: "ListDevices",
+			Handler:    _SecurityProxy_ListDevices_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

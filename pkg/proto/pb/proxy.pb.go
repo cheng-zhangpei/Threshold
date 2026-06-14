@@ -511,6 +511,365 @@ func (x *CloseAck) GetSuccess() bool {
 	return false
 }
 
+// ============================================================
+// Admin: Device management messages
+// ============================================================
+type RegisterDeviceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
+	OsType        string                 `protobuf:"bytes,2,opt,name=os_type,json=osType,proto3" json:"os_type,omitempty"`
+	Ip            string                 `protobuf:"bytes,3,opt,name=ip,proto3" json:"ip,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterDeviceRequest) Reset() {
+	*x = RegisterDeviceRequest{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterDeviceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterDeviceRequest) ProtoMessage() {}
+
+func (x *RegisterDeviceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterDeviceRequest.ProtoReflect.Descriptor instead.
+func (*RegisterDeviceRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RegisterDeviceRequest) GetDeviceUuid() string {
+	if x != nil {
+		return x.DeviceUuid
+	}
+	return ""
+}
+
+func (x *RegisterDeviceRequest) GetOsType() string {
+	if x != nil {
+		return x.OsType
+	}
+	return ""
+}
+
+func (x *RegisterDeviceRequest) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+type RegisterDeviceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterDeviceResponse) Reset() {
+	*x = RegisterDeviceResponse{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterDeviceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterDeviceResponse) ProtoMessage() {}
+
+func (x *RegisterDeviceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterDeviceResponse.ProtoReflect.Descriptor instead.
+func (*RegisterDeviceResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RegisterDeviceResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *RegisterDeviceResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type UnregisterDeviceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterDeviceRequest) Reset() {
+	*x = UnregisterDeviceRequest{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterDeviceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterDeviceRequest) ProtoMessage() {}
+
+func (x *UnregisterDeviceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterDeviceRequest.ProtoReflect.Descriptor instead.
+func (*UnregisterDeviceRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *UnregisterDeviceRequest) GetDeviceUuid() string {
+	if x != nil {
+		return x.DeviceUuid
+	}
+	return ""
+}
+
+type UnregisterDeviceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterDeviceResponse) Reset() {
+	*x = UnregisterDeviceResponse{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterDeviceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterDeviceResponse) ProtoMessage() {}
+
+func (x *UnregisterDeviceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterDeviceResponse.ProtoReflect.Descriptor instead.
+func (*UnregisterDeviceResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UnregisterDeviceResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UnregisterDeviceResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ListDevicesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDevicesRequest) Reset() {
+	*x = ListDevicesRequest{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDevicesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDevicesRequest) ProtoMessage() {}
+
+func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDevicesRequest.ProtoReflect.Descriptor instead.
+func (*ListDevicesRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListDevicesRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type DeviceInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
+	OsType        string                 `protobuf:"bytes,2,opt,name=os_type,json=osType,proto3" json:"os_type,omitempty"`
+	Ip            string                 `protobuf:"bytes,3,opt,name=ip,proto3" json:"ip,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceInfo) Reset() {
+	*x = DeviceInfo{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceInfo) ProtoMessage() {}
+
+func (x *DeviceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceInfo.ProtoReflect.Descriptor instead.
+func (*DeviceInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DeviceInfo) GetDeviceUuid() string {
+	if x != nil {
+		return x.DeviceUuid
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetOsType() string {
+	if x != nil {
+		return x.OsType
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+type ListDevicesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Devices       []*DeviceInfo          `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDevicesResponse) Reset() {
+	*x = ListDevicesResponse{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDevicesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDevicesResponse) ProtoMessage() {}
+
+func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDevicesResponse.ProtoReflect.Descriptor instead.
+func (*ListDevicesResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListDevicesResponse) GetDevices() []*DeviceInfo {
+	if x != nil {
+		return x.Devices
+	}
+	return nil
+}
+
 var File_pkg_proto_proxy_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_proxy_proto_rawDesc = "" +
@@ -547,18 +906,45 @@ const file_pkg_proto_proxy_proto_rawDesc = "" +
 	"\rconnection_id\x18\x01 \x01(\tR\fconnectionId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"$\n" +
 	"\bCloseAck\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*@\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"a\n" +
+	"\x15RegisterDeviceRequest\x12\x1f\n" +
+	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
+	"deviceUuid\x12\x17\n" +
+	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\"J\n" +
+	"\x16RegisterDeviceResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\":\n" +
+	"\x17UnregisterDeviceRequest\x12\x1f\n" +
+	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
+	"deviceUuid\"L\n" +
+	"\x18UnregisterDeviceResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"*\n" +
+	"\x12ListDevicesRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"V\n" +
+	"\n" +
+	"DeviceInfo\x12\x1f\n" +
+	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
+	"deviceUuid\x12\x17\n" +
+	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\"B\n" +
+	"\x13ListDevicesResponse\x12+\n" +
+	"\adevices\x18\x01 \x03(\v2\x11.proxy.DeviceInfoR\adevices*@\n" +
 	"\x06Status\x12\x06\n" +
 	"\x02OK\x10\x00\x12\v\n" +
 	"\aBLOCKED\x10\x01\x12\x0f\n" +
 	"\vBLACKLISTED\x10\x02\x12\x10\n" +
-	"\fRATE_LIMITED\x10\x032\xcc\x02\n" +
+	"\fRATE_LIMITED\x10\x032\xb6\x04\n" +
 	"\rSecurityProxy\x12<\n" +
 	"\vProxyStream\x12\x13.proxy.ProxyRequest\x1a\x14.proxy.ProxyResponse(\x010\x01\x12B\n" +
 	"\x13EstablishConnection\x12\x15.proxy.ConnectionInit\x1a\x14.proxy.ConnectionAck\x12:\n" +
 	"\x0fCloseConnection\x12\x16.proxy.ConnectionClose\x1a\x0f.proxy.CloseAck\x12>\n" +
 	"\fPullApproved\x12\x12.proxy.PullRequest\x1a\x16.proxy.ApprovedMessage(\x010\x01\x12=\n" +
-	"\x0fSubscribeNotify\x12\x14.proxy.NotifyRequest\x1a\x12.proxy.NotifyEvent0\x01B\x18Z\x16Threshold/pkg/proto/pbb\x06proto3"
+	"\x0fSubscribeNotify\x12\x14.proxy.NotifyRequest\x1a\x12.proxy.NotifyEvent0\x01\x12M\n" +
+	"\x0eRegisterDevice\x12\x1c.proxy.RegisterDeviceRequest\x1a\x1d.proxy.RegisterDeviceResponse\x12S\n" +
+	"\x10UnregisterDevice\x12\x1e.proxy.UnregisterDeviceRequest\x1a\x1f.proxy.UnregisterDeviceResponse\x12D\n" +
+	"\vListDevices\x12\x19.proxy.ListDevicesRequest\x1a\x1a.proxy.ListDevicesResponseB\x18Z\x16Threshold/pkg/proto/pbb\x06proto3"
 
 var (
 	file_pkg_proto_proxy_proto_rawDescOnce sync.Once
@@ -573,39 +959,53 @@ func file_pkg_proto_proxy_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_proxy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_pkg_proto_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_pkg_proto_proxy_proto_goTypes = []any{
-	(Status)(0),             // 0: proxy.Status
-	(*ProxyRequest)(nil),    // 1: proxy.ProxyRequest
-	(*ProxyResponse)(nil),   // 2: proxy.ProxyResponse
-	(*ConnectionInit)(nil),  // 3: proxy.ConnectionInit
-	(*ConnectionAck)(nil),   // 4: proxy.ConnectionAck
-	(*ConnectionClose)(nil), // 5: proxy.ConnectionClose
-	(*CloseAck)(nil),        // 6: proxy.CloseAck
-	nil,                     // 7: proxy.ProxyRequest.MetadataEntry
-	(*PullRequest)(nil),     // 8: proxy.PullRequest
-	(*NotifyRequest)(nil),   // 9: proxy.NotifyRequest
-	(*ApprovedMessage)(nil), // 10: proxy.ApprovedMessage
-	(*NotifyEvent)(nil),     // 11: proxy.NotifyEvent
+	(Status)(0),                      // 0: proxy.Status
+	(*ProxyRequest)(nil),             // 1: proxy.ProxyRequest
+	(*ProxyResponse)(nil),            // 2: proxy.ProxyResponse
+	(*ConnectionInit)(nil),           // 3: proxy.ConnectionInit
+	(*ConnectionAck)(nil),            // 4: proxy.ConnectionAck
+	(*ConnectionClose)(nil),          // 5: proxy.ConnectionClose
+	(*CloseAck)(nil),                 // 6: proxy.CloseAck
+	(*RegisterDeviceRequest)(nil),    // 7: proxy.RegisterDeviceRequest
+	(*RegisterDeviceResponse)(nil),   // 8: proxy.RegisterDeviceResponse
+	(*UnregisterDeviceRequest)(nil),  // 9: proxy.UnregisterDeviceRequest
+	(*UnregisterDeviceResponse)(nil), // 10: proxy.UnregisterDeviceResponse
+	(*ListDevicesRequest)(nil),       // 11: proxy.ListDevicesRequest
+	(*DeviceInfo)(nil),               // 12: proxy.DeviceInfo
+	(*ListDevicesResponse)(nil),      // 13: proxy.ListDevicesResponse
+	nil,                              // 14: proxy.ProxyRequest.MetadataEntry
+	(*PullRequest)(nil),              // 15: proxy.PullRequest
+	(*NotifyRequest)(nil),            // 16: proxy.NotifyRequest
+	(*ApprovedMessage)(nil),          // 17: proxy.ApprovedMessage
+	(*NotifyEvent)(nil),              // 18: proxy.NotifyEvent
 }
 var file_pkg_proto_proxy_proto_depIdxs = []int32{
-	7,  // 0: proxy.ProxyRequest.metadata:type_name -> proxy.ProxyRequest.MetadataEntry
+	14, // 0: proxy.ProxyRequest.metadata:type_name -> proxy.ProxyRequest.MetadataEntry
 	0,  // 1: proxy.ProxyResponse.status:type_name -> proxy.Status
-	1,  // 2: proxy.SecurityProxy.ProxyStream:input_type -> proxy.ProxyRequest
-	3,  // 3: proxy.SecurityProxy.EstablishConnection:input_type -> proxy.ConnectionInit
-	5,  // 4: proxy.SecurityProxy.CloseConnection:input_type -> proxy.ConnectionClose
-	8,  // 5: proxy.SecurityProxy.PullApproved:input_type -> proxy.PullRequest
-	9,  // 6: proxy.SecurityProxy.SubscribeNotify:input_type -> proxy.NotifyRequest
-	2,  // 7: proxy.SecurityProxy.ProxyStream:output_type -> proxy.ProxyResponse
-	4,  // 8: proxy.SecurityProxy.EstablishConnection:output_type -> proxy.ConnectionAck
-	6,  // 9: proxy.SecurityProxy.CloseConnection:output_type -> proxy.CloseAck
-	10, // 10: proxy.SecurityProxy.PullApproved:output_type -> proxy.ApprovedMessage
-	11, // 11: proxy.SecurityProxy.SubscribeNotify:output_type -> proxy.NotifyEvent
-	7,  // [7:12] is the sub-list for method output_type
-	2,  // [2:7] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	12, // 2: proxy.ListDevicesResponse.devices:type_name -> proxy.DeviceInfo
+	1,  // 3: proxy.SecurityProxy.ProxyStream:input_type -> proxy.ProxyRequest
+	3,  // 4: proxy.SecurityProxy.EstablishConnection:input_type -> proxy.ConnectionInit
+	5,  // 5: proxy.SecurityProxy.CloseConnection:input_type -> proxy.ConnectionClose
+	15, // 6: proxy.SecurityProxy.PullApproved:input_type -> proxy.PullRequest
+	16, // 7: proxy.SecurityProxy.SubscribeNotify:input_type -> proxy.NotifyRequest
+	7,  // 8: proxy.SecurityProxy.RegisterDevice:input_type -> proxy.RegisterDeviceRequest
+	9,  // 9: proxy.SecurityProxy.UnregisterDevice:input_type -> proxy.UnregisterDeviceRequest
+	11, // 10: proxy.SecurityProxy.ListDevices:input_type -> proxy.ListDevicesRequest
+	2,  // 11: proxy.SecurityProxy.ProxyStream:output_type -> proxy.ProxyResponse
+	4,  // 12: proxy.SecurityProxy.EstablishConnection:output_type -> proxy.ConnectionAck
+	6,  // 13: proxy.SecurityProxy.CloseConnection:output_type -> proxy.CloseAck
+	17, // 14: proxy.SecurityProxy.PullApproved:output_type -> proxy.ApprovedMessage
+	18, // 15: proxy.SecurityProxy.SubscribeNotify:output_type -> proxy.NotifyEvent
+	8,  // 16: proxy.SecurityProxy.RegisterDevice:output_type -> proxy.RegisterDeviceResponse
+	10, // 17: proxy.SecurityProxy.UnregisterDevice:output_type -> proxy.UnregisterDeviceResponse
+	13, // 18: proxy.SecurityProxy.ListDevices:output_type -> proxy.ListDevicesResponse
+	11, // [11:19] is the sub-list for method output_type
+	3,  // [3:11] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_proxy_proto_init() }
@@ -621,7 +1021,7 @@ func file_pkg_proto_proxy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_proxy_proto_rawDesc), len(file_pkg_proto_proxy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

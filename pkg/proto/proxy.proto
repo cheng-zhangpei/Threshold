@@ -1,4 +1,4 @@
-syntax = "proto3";
+﻿syntax = "proto3";
 
 package proxy;
 
@@ -50,6 +50,13 @@ service SecurityProxy {
     // 服务端通过长连接推送连接建立/关闭、设备拉黑、告警等事件。
     // ----------------------------------------------------------
     rpc SubscribeNotify(NotifyRequest) returns (stream NotifyEvent);
+
+    // ----------------------------------------------------------
+    // Admin: Device management
+    // ----------------------------------------------------------
+    rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+    rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
+    rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
 }
 
 // ============================================================
@@ -168,4 +175,42 @@ message ConnectionClose {
 message CloseAck {
     // success 关闭操作是否成功
     bool success = 1;
+}
+
+
+// ============================================================
+// Admin: Device management messages
+// ============================================================
+message RegisterDeviceRequest {
+	string device_uuid = 1;
+	string os_type = 2;
+	string ip = 3;
+}
+
+message RegisterDeviceResponse {
+	bool success = 1;
+	string reason = 2;
+}
+
+message UnregisterDeviceRequest {
+	string device_uuid = 1;
+}
+
+message UnregisterDeviceResponse {
+	bool success = 1;
+	string reason = 2;
+}
+
+message ListDevicesRequest {
+	int32 limit = 1;
+}
+
+message DeviceInfo {
+	string device_uuid = 1;
+	string os_type = 2;
+	string ip = 3;
+}
+
+message ListDevicesResponse {
+	repeated DeviceInfo devices = 1;
 }

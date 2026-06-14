@@ -1,8 +1,9 @@
-package grpc
+﻿package grpc
 
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"Threshold/server/decision"
 	"Threshold/server/fingerprint"
 	"Threshold/server/output"
+	"Threshold/server/portrait"
 	"Threshold/server/router"
 
 	pb "Threshold/pkg/proto/pb"
@@ -27,9 +29,10 @@ type Handler struct {
 
 	fpTree     *fingerprint.Tree
 	engine     *decision.Engine
-	router     *router.Router
+	r          *router.Router
 	outputBuf  *output.OutputBuffer
 	alertQueue *alert.AlertQueue
+	portrait   *portrait.Store
 
 	notifySubs sync.Map
 }
@@ -37,24 +40,25 @@ type Handler struct {
 func NewHandler(
 	fpTree *fingerprint.Tree,
 	engine *decision.Engine,
-	router *router.Router,
+	r *router.Router,
 	outputBuf *output.OutputBuffer,
 	alertQueue *alert.AlertQueue,
+	portraitStore *portrait.Store,
 ) *Handler {
 	return &Handler{
 		connections: make(map[string]*types.ConnectionContext),
 		fpTree:      fpTree,
 		engine:      engine,
-		router:      router,
+		r:           r,
 		outputBuf:   outputBuf,
 		alertQueue:  alertQueue,
+		portrait:    portraitStore,
 	}
 }
 
 // ============================================================
-// EstablishConnection 连接初始化
+// EstablishConnection
 // ============================================================
-
 func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionInit) (*pb.ConnectionAck, error) {
 	if req.UserId == "" || req.DeviceUuid == "" {
 		return &pb.ConnectionAck{Accepted: false, Reason: "missing user_id or device_uuid"}, nil
@@ -80,10 +84,8 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 }
 
 // ============================================================
-// ProxyStream 请求代理流
-// 流水线: Parse -> Fingerprint -> Router(Classify) -> Decision -> Response
+// ProxyStream
 // ============================================================
-
 func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 	for {
 		req, err := stream.Recv()
@@ -96,13 +98,13 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			return status.Errorf(codes.InvalidArgument, "parse request: %v", err)
 		}
 
-		// Step 1: 指纹校验
+		// Step 1: fingerprint check
 		if !h.fpTree.Match(parsed.Fingerprint) {
 			stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: pb.Status_BLOCKED, Reason: "fingerprint mismatch"})
 			continue
 		}
 
-		// Step 2: 记录事件到 ConnectionContext
+		// Step 2: record event
 		h.mu.RLock()
 		connCtx := h.connections[parsed.ConnectionID]
 		h.mu.RUnlock()
@@ -110,40 +112,34 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			connCtx.RecordEvent(parsed.OpKey)
 		}
 
-		// Step 3: Router 分级路由
-		// L0 直接穿透到 OutputBuffer，L1+ 由 DispatchManager 处理
-		// 当前 DispatchManager 尚未实现，L1+ 暂时直接走决策引擎
-		riskLevel := h.router.Classify(parsed)
+		// Step 3: route
+		riskLevel := h.r.Classify(parsed)
 
 		var decisionResult *types.Decision
 		if riskLevel == types.L0 {
-			decisionResult = &types.Decision{
-				Action: types.ALLOW,
-				Reason: "L0 direct pass",
-				RuleID: "L0",
-			}
+			decisionResult = &types.Decision{Action: types.ALLOW, Reason: "L0 direct pass", RuleID: "L0"}
 			h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
 		} else {
-			history := make([]*types.ConnectionSummary, 0)
+			// Fetch history from portrait store for decision engine
+			history := h.portrait.GetHistory(parsed.UserID, 20)
 			decisionResult = h.engine.Evaluate(connCtx, history, riskLevel)
 
-			// 根据决策结果分发到 OutputBuffer 或 AlertQueue
 			switch decisionResult.Action {
-			case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
-				h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
-			default:
-				h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
+				case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
+					h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
+				default:
+					h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
 			}
 		}
 
-		// Step 4: 映射决策到 gRPC 响应状态 TODO 更多的响应决策
+		// Step 4: map to gRPC response
 		respStatus := pb.Status_OK
 		reason := decisionResult.Reason
 		switch decisionResult.Action {
-		case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
-			respStatus = pb.Status_BLOCKED
+			case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
+				respStatus = pb.Status_BLOCKED
 		case types.REQUIRE_2FA, types.BLOCK_LOGIN:
-			respStatus = pb.Status_RATE_LIMITED
+				respStatus = pb.Status_RATE_LIMITED
 		}
 
 		stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: respStatus, Reason: reason})
@@ -151,12 +147,11 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 }
 
 // ============================================================
-// CloseConnection 连接关闭
+// CloseConnection
 // ============================================================
-
 func (h *Handler) CloseConnection(ctx context.Context, req *pb.ConnectionClose) (*pb.CloseAck, error) {
 	h.mu.Lock()
-	_, exists := h.connections[req.ConnectionId]
+	connCtx, exists := h.connections[req.ConnectionId]
 	if exists {
 		delete(h.connections, req.ConnectionId)
 	}
@@ -165,15 +160,18 @@ func (h *Handler) CloseConnection(ctx context.Context, req *pb.ConnectionClose) 
 	if !exists {
 		return &pb.CloseAck{Success: false}, nil
 	}
+
+	// Update portrait: extract summary + aggregate profile
+	if err := h.portrait.OnConnectionClose(connCtx); err != nil {
+		log.Printf("[PORTRAIT] failed to update on close: %v", err)
+	}
+
 	return &pb.CloseAck{Success: true}, nil
 }
 
 // ============================================================
-// PullApproved 下游拉取已通过校验的消息
-// 双向流: 客户端发送 PullRequest 指定 batch_size
-// 服务端从 OutputBuffer 批量拉取并返回 ApprovedMessage
+// PullApproved
 // ============================================================
-
 func (h *Handler) PullApproved(stream pb.SecurityProxy_PullApprovedServer) error {
 	for {
 		req, err := stream.Recv()
@@ -186,7 +184,6 @@ func (h *Handler) PullApproved(stream pb.SecurityProxy_PullApprovedServer) error
 			batchSize = 100
 		}
 
-		// 从 OutputBuffer 拉取全部消息，取前 batchSize 条
 		allMsgs := h.outputBuf.Pull()
 		count := batchSize
 		if count > len(allMsgs) {
@@ -208,7 +205,6 @@ func (h *Handler) PullApproved(stream pb.SecurityProxy_PullApprovedServer) error
 			}
 		}
 
-		// 如果有剩余消息，放回 OutputBuffer
 		if count < len(allMsgs) {
 			for i := count; i < len(allMsgs); i++ {
 				h.outputBuf.Put(allMsgs[i])
@@ -218,55 +214,80 @@ func (h *Handler) PullApproved(stream pb.SecurityProxy_PullApprovedServer) error
 }
 
 // ============================================================
-// SubscribeNotify 下游订阅告警通知
-// 服务端单向流: 订阅 AlertQueue，实时推送 NotifyEvent
+// SubscribeNotify
 // ============================================================
-
 func (h *Handler) SubscribeNotify(req *pb.NotifyRequest, stream pb.SecurityProxy_SubscribeNotifyServer) error {
 	if req.SubscriberId == "" {
 		return status.Errorf(codes.InvalidArgument, "missing subscriber_id")
 	}
 
-	// 注册到 AlertQueue 订阅者
 	ch := h.alertQueue.Subscribe(req.SubscriberId)
 	defer h.alertQueue.Unsubscribe(req.SubscriberId)
 
 	for {
 		select {
-		case entry, ok := <-ch:
-			if !ok {
-				return nil
-			}
-			event := &pb.NotifyEvent{
-				EventId:      fmt.Sprintf("alert-%d", time.Now().UnixNano()),
-				EventType:    pb.EventType_ALERT_TRIGGERED,
-				UserId:       entry.Request.UserID,
-				ConnectionId: entry.Request.ConnectionID,
-				DeviceUuid:   entry.Request.DeviceUUID,
-				Message:      entry.Decision.Reason,
-				Timestamp:    time.Now().UnixMilli(),
-			}
-			if err := stream.Send(event); err != nil {
-				return err
-			}
-
-		case <-stream.Context().Done():
-			return stream.Context().Err()
+			case entry, ok := <-ch:
+				if !ok {
+					return nil
+				}
+				event := &pb.NotifyEvent{
+					EventId:      fmt.Sprintf("alert-%d", time.Now().UnixNano()),
+					EventType:    pb.EventType_ALERT_TRIGGERED,
+					UserId:       entry.Request.UserID,
+					ConnectionId: entry.Request.ConnectionID,
+					DeviceUuid:   entry.Request.DeviceUUID,
+					Message:      entry.Decision.Reason,
+					Timestamp:    time.Now().UnixMilli(),
+				}
+				if err := stream.Send(event); err != nil {
+					return err
+				}
+			case <-stream.Context().Done():
+				return stream.Context().Err()
 		}
 	}
 }
 
 // ============================================================
-// BroadcastNotify 向所有订阅者广播通知事件
+// BroadcastNotify
 // ============================================================
-
 func (h *Handler) BroadcastNotify(event *pb.NotifyEvent) {
 	h.notifySubs.Range(func(key, value interface{}) bool {
 		ch := value.(chan *pb.NotifyEvent)
 		select {
-		case ch <- event:
-		default:
+			case ch <- event:
+			default:
 		}
 		return true
 	})
+}
+
+// ============================================================
+// Admin: Device management
+// ============================================================
+
+func (h *Handler) RegisterDevice(ctx context.Context, req *pb.RegisterDeviceRequest) (*pb.RegisterDeviceResponse, error) {
+	osType := req.OsType
+	ip := req.Ip
+	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid, OS: &osType, IP: &ip}
+	if err := h.fpTree.Register("admin", fp); err != nil {
+		return &pb.RegisterDeviceResponse{Success: false, Reason: err.Error()}, nil
+	}
+	log.Printf("[ADMIN] device registered: uuid=%s os=%s ip=%s", req.DeviceUuid, req.OsType, req.Ip)
+	return &pb.RegisterDeviceResponse{Success: true}, nil
+}
+
+func (h *Handler) UnregisterDevice(ctx context.Context, req *pb.UnregisterDeviceRequest) (*pb.UnregisterDeviceResponse, error) {
+	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid}
+	if err := h.fpTree.Unregister("admin", fp); err != nil {
+		return &pb.UnregisterDeviceResponse{Success: false, Reason: err.Error()}, nil
+	}
+	log.Printf("[ADMIN] device unregistered: uuid=%s", req.DeviceUuid)
+	return &pb.UnregisterDeviceResponse{Success: true}, nil
+}
+
+func (h *Handler) ListDevices(ctx context.Context, req *pb.ListDevicesRequest) (*pb.ListDevicesResponse, error) {
+	// TODO: iterate fingerprint tree to list all registered devices
+	// For now return empty list
+	return &pb.ListDevicesResponse{Devices: []*pb.DeviceInfo{}}, nil
 }
