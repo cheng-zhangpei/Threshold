@@ -257,9 +257,9 @@ Thresholds strategy: **fail open for low-risk, fail closed for high-risk**
 
 | Scenario | Strategy | Rationale |
 |----------|----------|-----------|
-| L0 (GET reads) | Always ALLOW | Reading public data is safe; blocking disrupts normal workflow |
 | L1 (writes) | AUDIT baseline | Log for forensics, but allow business to continue |
 | L2 (DELETE) | ALERT baseline | Actively notify admins, but do not block (could be legitimate cleanup) |
+| L0 (GET reads) | Always ALLOW | Reading public data is safe; blocking disrupts normal workflow |
 | Portrait high risk | ALERT | User is suspicious but not confirmed malicious; alert for human review |
 | Repeat offender | BLACKLIST_DEVICE | Pattern is clear; blocking is justified to prevent further damage |
 | Blacklisted device | BLACKLIST_DEVICE | Already confirmed; zero tolerance |

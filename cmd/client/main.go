@@ -1,14 +1,15 @@
-﻿package main
+package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"Threshold/pkg/config"
 	"Threshold/client/proxy"
+	"Threshold/pkg/config"
 )
 
 func main() {
@@ -22,7 +23,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		os.Exit(1)
 	}
-
+	file, err := os.OpenFile("/var/log/myapp.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, file))
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	p := proxy.New(proxy.Config{
 		ListenAddr: cfg.Proxy.ListenAddr,
 		ServerAddr: cfg.Proxy.ServerAddr,

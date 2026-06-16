@@ -229,7 +229,7 @@ ProxyStream -> GetHistory(userID, 20)
 | 4 | OutputBuffer + AlertQueue + Router | Done |
 | 5 | DispatchManager + WorkerPool | Done |
 | 6 | gRPC enhancements + Cross-device + Portrait | Done |
-| 7 | Client implementation | Pending |
+| 7 | Client implementation | Done |
 | 8 | End-to-end integration | Done |
 
 ### Future Items

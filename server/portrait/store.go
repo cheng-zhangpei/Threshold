@@ -1,13 +1,14 @@
 package portrait
 
 import (
+	"Threshold/pkg/types"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"Threshold/pkg/storage"
-	"Threshold/pkg/types"
+	_ "Threshold/pkg/types"
 )
 
 const MaxHistoryPerUser = 50

@@ -3,6 +3,7 @@ package grpc
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 
 	"google.golang.org/grpc"
@@ -46,6 +47,7 @@ func New(
 	if cfg.TLS.Enabled {
 		creds, err := loadTLSCredentials(cfg.TLS)
 		if err != nil {
+			log.Printf("Failed to load TLS credentials: %v", err)
 			return nil, fmt.Errorf("load tls: %w", err)
 		}
 		opts = append(opts, grpc.Creds(creds))
@@ -57,6 +59,7 @@ func New(
 
 	listener, err := net.Listen("tcp", cfg.GRPC.ListenAddr)
 	if err != nil {
+		log.Printf("failed to listen: %v", err)
 		return nil, fmt.Errorf("listen: %w", err)
 	}
 
@@ -69,6 +72,7 @@ func (s *Server) GracefulStop() { s.grpcServer.GracefulStop() }
 func loadTLSCredentials(cfg config.TLSConfig) (credentials.TransportCredentials, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
+		log.Printf("Failed to load TLS certificates: %v", err)
 		return nil, fmt.Errorf("load cert: %w", err)
 	}
 	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}

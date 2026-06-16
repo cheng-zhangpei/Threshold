@@ -1,4 +1,4 @@
-﻿package grpc
+package grpc
 
 import (
 	"context"
@@ -60,6 +60,7 @@ func NewHandler(
 // EstablishConnection
 // ============================================================
 func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionInit) (*pb.ConnectionAck, error) {
+	//log.Printf("EstablishConnection called")
 	if req.UserId == "" || req.DeviceUuid == "" {
 		return &pb.ConnectionAck{Accepted: false, Reason: "missing user_id or device_uuid"}, nil
 	}
@@ -67,6 +68,7 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 	connIP := req.Ip
 	fp := types.DeviceFingerprint{OS: &req.OsType, IP: &connIP, UUID: &req.DeviceUuid}
 	if !h.fpTree.Match(fp) {
+		log.Println("device not registered!")
 		return &pb.ConnectionAck{Accepted: false, Reason: "device not registered"}, nil
 	}
 
@@ -95,11 +97,13 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 
 		parsed, err := types.ParseProxyRequest(req.ConnectionId, req.DeviceUuid, req.UserId, req.Timestamp, req.RawHttpRequest)
 		if err != nil {
+			log.Printf("parse request: %v", err)
 			return status.Errorf(codes.InvalidArgument, "parse request: %v", err)
 		}
 
 		// Step 1: fingerprint check
 		if !h.fpTree.Match(parsed.Fingerprint) {
+			log.Println("device not registered!")
 			stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: pb.Status_BLOCKED, Reason: "fingerprint mismatch"})
 			continue
 		}
@@ -125,10 +129,10 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			decisionResult = h.engine.Evaluate(connCtx, history, riskLevel)
 
 			switch decisionResult.Action {
-				case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
-					h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
-				default:
-					h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
+			case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
+				h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
+			default:
+				h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
 			}
 		}
 
@@ -136,10 +140,10 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 		respStatus := pb.Status_OK
 		reason := decisionResult.Reason
 		switch decisionResult.Action {
-			case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
-				respStatus = pb.Status_BLOCKED
+		case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
+			respStatus = pb.Status_BLOCKED
 		case types.REQUIRE_2FA, types.BLOCK_LOGIN:
-				respStatus = pb.Status_RATE_LIMITED
+			respStatus = pb.Status_RATE_LIMITED
 		}
 
 		stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: respStatus, Reason: reason})
@@ -226,24 +230,24 @@ func (h *Handler) SubscribeNotify(req *pb.NotifyRequest, stream pb.SecurityProxy
 
 	for {
 		select {
-			case entry, ok := <-ch:
-				if !ok {
-					return nil
-				}
-				event := &pb.NotifyEvent{
-					EventId:      fmt.Sprintf("alert-%d", time.Now().UnixNano()),
-					EventType:    pb.EventType_ALERT_TRIGGERED,
-					UserId:       entry.Request.UserID,
-					ConnectionId: entry.Request.ConnectionID,
-					DeviceUuid:   entry.Request.DeviceUUID,
-					Message:      entry.Decision.Reason,
-					Timestamp:    time.Now().UnixMilli(),
-				}
-				if err := stream.Send(event); err != nil {
-					return err
-				}
-			case <-stream.Context().Done():
-				return stream.Context().Err()
+		case entry, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			event := &pb.NotifyEvent{
+				EventId:      fmt.Sprintf("alert-%d", time.Now().UnixNano()),
+				EventType:    pb.EventType_ALERT_TRIGGERED,
+				UserId:       entry.Request.UserID,
+				ConnectionId: entry.Request.ConnectionID,
+				DeviceUuid:   entry.Request.DeviceUUID,
+				Message:      entry.Decision.Reason,
+				Timestamp:    time.Now().UnixMilli(),
+			}
+			if err := stream.Send(event); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return stream.Context().Err()
 		}
 	}
 }
@@ -255,8 +259,8 @@ func (h *Handler) BroadcastNotify(event *pb.NotifyEvent) {
 	h.notifySubs.Range(func(key, value interface{}) bool {
 		ch := value.(chan *pb.NotifyEvent)
 		select {
-			case ch <- event:
-			default:
+		case ch <- event:
+		default:
 		}
 		return true
 	})

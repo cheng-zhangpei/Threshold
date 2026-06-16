@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"Threshold/pkg/types"
@@ -91,6 +92,7 @@ func (r *Router) run() {
 		select {
 		case req, ok := <-r.inputCh:
 			if !ok {
+				log.Printf("router input channel closed")
 				return
 			}
 			decision := r.process(req.parsed)
@@ -117,7 +119,6 @@ func (r *Router) process(parsed *types.ParsedRequest) *types.Decision {
 		})
 		return decision
 	}
-
 	return r.dispatch.Enqueue(parsed, riskLevel)
 }
 

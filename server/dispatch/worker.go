@@ -1,6 +1,7 @@
-﻿package dispatch
+package dispatch
 
 import (
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,7 @@ type Worker struct {
 }
 
 func NewWorker(id int64, dm *DispatchManager) *Worker {
+	log.Print("Worker:  started", id)
 	return &Worker{
 		id:         id,
 		dm:         dm,

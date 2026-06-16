@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,7 +33,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
 		os.Exit(1)
 	}
-
+	file, err := os.OpenFile("/var/log/myapp.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, file))
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	// --- 存储层 ---
 	store, err := storage.NewBoltStore(cfg.Fingerprint.DBPath)
 	if err != nil {
@@ -43,7 +50,7 @@ func main() {
 	wal := storage.NewWAL(store)
 	recovered, _ := wal.Recover()
 	if recovered > 0 {
-		fmt.Printf("wal recovered %d entries\n", recovered)
+		log.Printf("wal recovered %d entries\n", recovered)
 	}
 
 	// --- 指纹匹配引擎 ---

@@ -1,9 +1,10 @@
-﻿package dispatch
+package dispatch
 
 import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -106,6 +107,7 @@ func (ts *TaskStore) Reload(batch int) (*ReloadResult, error) {
 	var result ReloadResult
 
 	err := ts.store.View(func(tx storage.Tx) error {
+		log.Printf("dispatch: reloading from storage")
 		keys, values, err := tx.PrefixScan(storage.BucketDispatchTasks, nil)
 		if err != nil {
 			return err

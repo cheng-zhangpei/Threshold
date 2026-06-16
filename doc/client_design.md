@@ -1,4 +1,4 @@
-﻿# Threshold Client - 设计文档
+﻿﻿# Threshold Client - 设计文档
 
 ## 1. 定位
 
@@ -85,12 +85,12 @@ OpTag 格式：`total:write:read:lastOp`
 IDV Client                  Threshold Client              Threshold Server
     |                            |                            |
     |-- EstablishConnection ---->|                            |
-    |   (device_uuid, user_id,  |-- EstablishConnection ---->|
-    |    os_type, ip)           |   (透传)                    |
+    |   (device_uuid, user_id,   |-- EstablishConnection ---->|
+    |    os_type, ip)            |   (透传)                    |
     |                            |<-- ConnectionAck ----------|
-    |<-- ConnectionAck ---------|   (conn_id, accepted)      |
-    |   (conn_id)               |                            |
-    |                            |-- 创建 connState          |
+    |<-- ConnectionAck ----------|   (conn_id, accepted)      |
+    |   (conn_id)                |                            |
+    |                            |-- 创建 connState            |
     |                            |   (connID, collector)      |
 ```
 
@@ -101,7 +101,7 @@ IDV Client                  Threshold Client              Threshold Server
     |                            |                            |
     |-- ProxyStream.Send ------->|                            |
     |   (conn_id, raw_http)      |-- Record(collector)        |
-    |                            |-- ProxyStream.Send ------>|
+    |                            |-- ProxyStream.Send ---- -->|
     |                            |   (透传请求)                |
     |                            |<-- ProxyStream.Recv -------|
     |                            |   (status, reason)         |
@@ -119,7 +119,7 @@ IDV Client                  Threshold Client              Threshold Server
     |                            |-- CloseConnection -------->|
     |                            |   (透传)                    |
     |                            |<-- CloseAck ---------------|
-    |<-- CloseAck --------------|                            |
+    |<-- CloseAck ---------------|                            |
 ```
 
 ## 4. Proto 接口
@@ -128,8 +128,8 @@ Client 复用 Server 的 SecurityProxy proto，实现相同的接口：
 
 | RPC | Client 行为 |
 |-----|-------------|
-| EstablishConnection | 转发到 Server，存储 connState |
 | ProxyStream | 记录事件到 collector，转发到 Server |
+| EstablishConnection | 转发到 Server，存储 connState |
 | CloseConnection | 清理 connState，转发到 Server |
 | RegisterDevice | 转发到 Server（管理员接口） |
 | UnregisterDevice | 转发到 Server（管理员接口） |
