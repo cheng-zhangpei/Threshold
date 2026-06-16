@@ -18,7 +18,7 @@ func newTestEngine(t *testing.T) *Engine {
 
 	t.Helper()
 
-	tmpFile, _ := os.CreateTemp("", "decision-test-*.db")
+	tmpFile, _ := os.CreateTemp("", "decision-scripts-*.db")
 
 	tmpFile.Close()
 

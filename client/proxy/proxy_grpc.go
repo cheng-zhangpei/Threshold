@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -90,6 +91,10 @@ func (p *LocalProxy) Stop() {
 
 func (p *LocalProxy) EstablishConnection(ctx context.Context, req *pb.ConnectionInit) (*pb.ConnectionAck, error) {
 	log.Printf("[CLIENT] EstablishConnection user=%s device=%s", req.UserId, req.DeviceUuid)
+	if req.Protocol != "tcp" {
+		// TODO(cheng) 目前只是支持这两种协议,所以具体的类型只可能是两者之一
+		req.Protocol = "http"
+	}
 	resp, err := p.serverClient.EstablishConnection(ctx, req)
 	if err != nil {
 		return nil, err
@@ -132,10 +137,14 @@ func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) erro
 			osType = cs.osType
 			clientIP = cs.ip // ← 用 ConnectionInit 时保存的 IP
 		}
+		processedData, _ := detectAndInject(req.RawHttpRequest, deviceUUID, osType, clientIP)
+		req.RawHttpRequest = processedData
+		// ─────────────────────
 
-		injected, err := injectProxyHeaders(req.RawHttpRequest, deviceUUID, osType, clientIP)
+		serverStream, err := p.serverClient.ProxyStream(context.Background())
+		//injected, err := injectProxyHeaders(req.RawHttpRequest, deviceUUID, osType, clientIP)
 		if err != nil {
-			log.Printf("[CLIENT] injectProxyHeaders error: %v", err)
+			log.Printf("[CLIENT] injectFingerprint error: %v", err)
 			stream.Send(&pb.ProxyResponse{
 				ConnectionId: req.ConnectionId,
 				Status:       pb.Status_BLOCKED,
@@ -143,10 +152,10 @@ func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) erro
 			})
 			continue
 		}
-		req.RawHttpRequest = injected
+		//req.RawHttpRequest = injected
 		// ──────────────────────────────────
 
-		serverStream, err := p.serverClient.ProxyStream(context.Background())
+		serverStream, err = p.serverClient.ProxyStream(context.Background())
 		if err != nil {
 			stream.Send(&pb.ProxyResponse{
 				ConnectionId: req.ConnectionId,
@@ -243,4 +252,70 @@ func injectProxyHeaders(raw []byte, deviceUUID, osType, clientIP string) ([]byte
 
 	// 没有 body，追加到末尾
 	return []byte(strings.TrimRight(s, "\r\n") + "\r\n" + injectLines + "\r\n"), nil
+}
+
+// injectTCPFingerprint 在 TCP 字节流前添加指纹头（原型）
+func injectTCPFingerprint(raw []byte, deviceUUID string) ([]byte, bool) {
+	if len(raw) == 0 || deviceUUID == "" {
+		return raw, false
+	}
+	// 构造 payload: [4字节长度][UUID字节]
+	uuidBytes := []byte(deviceUUID)
+	length := uint32(len(uuidBytes))
+	header := make([]byte, 4)
+	binary.BigEndian.PutUint32(header, length)
+	injected := append(header, uuidBytes...)
+	injected = append(injected, raw...)
+	return injected, true
+}
+
+// detectAndInject 智能探测并注入指纹
+// 返回值: (新数据, 是否修改)
+func detectAndInject(raw []byte, deviceUUID, osType, clientIP string) ([]byte, bool) {
+	if len(raw) == 0 {
+		return raw, false
+	}
+	switch detectProtocol(raw) {
+	case protocolHTTP:
+		injected, err := injectProxyHeaders(raw, deviceUUID, osType, clientIP)
+		if err != nil {
+			log.Printf("[CLIENT] inject HTTP headers error: %v", err)
+			return raw, false
+		}
+		return injected, true
+	case protocolTCP:
+		// TODO(CHENG) 我认为这里其实没必要注入指纹,指纹在grpc建立连接的时候就已经确立了
+		//injected, _ := injectTCPFingerprint(raw, deviceUUID)
+		return raw, true
+	default:
+		// 未知协议，原样返回（安全策略）
+		return raw, false
+	}
+}
+
+const (
+	protocolUnknown = iota
+	protocolHTTP
+	protocolTCP
+	// 未来可添加: protocolTLS, protocolSSH, protocolMySQL, ...
+)
+
+// detectProtocol 简单探测
+func detectProtocol(raw []byte) int {
+	// HTTP 方法列表
+	methods := [][]byte{
+		[]byte("GET "), []byte("POST "), []byte("PUT "),
+		[]byte("DELETE "), []byte("PATCH "), []byte("HEAD "),
+		[]byte("CONNECT "), []byte("OPTIONS "), []byte("TRACE "),
+	}
+	for _, m := range methods {
+		if len(raw) >= len(m) && string(raw[:len(m)]) == string(m) {
+			return protocolHTTP
+		}
+	}
+	// 其他协议探测可在此扩展，例如：
+	// if len(raw) >= 3 && raw[0] == 0x16 && raw[1] == 0x03 { return protocolTLS }
+	// if len(raw) >= 4 && string(raw[:4]) == "SSH-" { return protocolSSH }
+	// 默认非 HTTP 视为普通 TCP
+	return protocolTCP
 }

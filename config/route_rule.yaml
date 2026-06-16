@@ -1,0 +1,50 @@
+# configs/router_rules.yaml
+enable: true
+rules:
+  # HTTP 规则
+  - id: "http_get_public"
+    match:
+      method: "GET"
+      path: "/api/public/*"
+    risk_level: L0
+    action: ALLOW          # 可选，覆盖默认决策
+    priority: 100
+
+  - id: "http_delete_vm"
+    match:
+      method: "DELETE"
+      path: "/api/vm/*"
+    risk_level: L3
+    action: BLACKLIST_DEVICE
+    priority: 90
+
+  # TCP 规则（按目标地址匹配）
+  # todo(cheng) 其实我们所有tcp规则的指定，tcp本身是没有语义性的，这个语义性需要让管理指定，针对不同的语义制定独立的规则
+  - id: "tcp_mysql"
+    match:
+      method: "TCP"
+      path: "*:3306"        # 目标地址通配
+    risk_level: L2
+    priority: 80
+
+  - id: "tcp_ssh"
+    match:
+      method: "TCP"
+      path: "*:22"
+    risk_level: L1
+    priority: 75
+
+  - id: "tcp_default"
+    match:
+      method: "TCP"
+      path: "*"
+    risk_level: L1
+    priority: 10
+
+  # 默认规则（兜底）
+  - id: "default"
+    match:
+      method: "*"
+      path: "*"
+    risk_level: L1
+    priority: 0

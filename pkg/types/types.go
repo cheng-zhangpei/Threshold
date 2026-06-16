@@ -82,6 +82,7 @@ type ConnectionContext struct {
 	IP             string
 	Events         []EventRecord
 	TriggeredFlags []string
+	Protocol       string
 }
 
 func (c *ConnectionContext) RecordEvent(opType string) {
@@ -159,10 +160,10 @@ func ParseProxyRequest(connectionID, deviceUUID, userID string, timestamp int64,
 	if len(rawHTTPRequest) == 0 {
 		return nil, fmt.Errorf("empty raw_http_request")
 	}
-	if err := req.parseHTTPRequest(rawHTTPRequest); err != nil {
-		return nil, err
-	}
-	req.extractFingerprint()
+	//if err := req.parseHTTPRequest(rawHTTPRequest); err != nil {
+	//	return nil, err
+	//}
+	//req.extractFingerprint()
 	req.OpKey = req.Method + " " + req.Path
 	return req, nil
 }

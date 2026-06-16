@@ -235,7 +235,7 @@ Worker 退休通过 atomic.Bool.CompareAndSwap 实现无锁标记。退休是软
 ## 8. 配置示例
 
 ```yaml
-# config/server.yaml
+# configs/server.yaml
 dispatch:
   min_workers: 2
   max_workers: 64

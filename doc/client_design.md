@@ -169,7 +169,7 @@ Client 复用 Server 的 SecurityProxy proto，实现相同的接口：
 ## 6. 配置
 
 ```yaml
-# config/client.yaml
+# configs/client.yaml
 proxy:
   listen_addr: ":9090"      # IDV Client 连接地址
   server_addr: "localhost:50051"  # Threshold Server 地址

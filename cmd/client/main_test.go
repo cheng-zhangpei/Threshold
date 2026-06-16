@@ -1,6 +1,8 @@
 package main
 
 import (
+	"Threshold/server/router/router_v1"
+	"Threshold/server/router/router_v2"
 	"context"
 	"fmt"
 	"log"
@@ -23,7 +25,6 @@ import (
 	"Threshold/server/fingerprint"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
-	"Threshold/server/router"
 
 	clientproxy "Threshold/client/proxy"
 	servergrpc "Threshold/server/grpc"
@@ -47,7 +48,7 @@ func setupEnv(t *testing.T) *testEnv {
 		t.Fatalf("mkdir temp: %v", err)
 	}
 
-	store, err := storage.NewBoltStore(filepath.Join(tmpDir, "test.db"))
+	store, err := storage.NewBoltStore(filepath.Join(tmpDir, "scripts.db"))
 	if err != nil {
 		t.Fatalf("new bolt store: %v", err)
 	}
@@ -59,7 +60,7 @@ func setupEnv(t *testing.T) *testEnv {
 		t.Fatalf("new fingerprint tree: %v", err)
 	}
 
-	testUUID := "test-device-001"
+	testUUID := "scripts-device-001"
 	testOS := "linux"
 	testIP := "10.0.0.1"
 	fpTree.Register("init", types.DeviceFingerprint{
@@ -81,15 +82,18 @@ func setupEnv(t *testing.T) *testEnv {
 		},
 	})
 
-	riskTable := router.NewOperationRiskTable()
-	r := router.NewRouter(riskTable, outputBuf, dm, 2, 256)
+	riskTable := router_v1.NewOperationRiskTable()
+	r := router_v1.NewRouter(riskTable, outputBuf, dm, 2, 256)
+
+	// r2 可选，测试中暂时不用，传 nil
+	var r2 *router_v2.Router = nil
 
 	srvLis, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	grpcSrv := grpc.NewServer()
-	handler := servergrpc.NewHandler(fpTree, engine, r, outputBuf, alertQueue, ps)
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps)
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 	go grpcSrv.Serve(srvLis)
 	srvAddr := srvLis.Addr().String()
@@ -97,8 +101,8 @@ func setupEnv(t *testing.T) *testEnv {
 	cp := clientproxy.New(clientproxy.Config{
 		ListenAddr: ":0",
 		ServerAddr: srvAddr,
-		DeviceUUID: "test-device-001",
-		UserID:     "test-user",
+		DeviceUUID: "scripts-device-001",
+		UserID:     "scripts-user",
 		OSType:     "linux",
 	})
 	go cp.Start()
@@ -138,8 +142,8 @@ func directClient(t *testing.T, addr string) pb.SecurityProxyClient {
 
 var rawGET = []byte("GET /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n")
 var rawDELETE = []byte("DELETE /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n")
-var rawPOST = []byte("POST /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n{\"name\":\"test-image\"}")
-var rawUnknownPath = []byte("PATCH /api/v1/unknown/endpoint HTTP/1.1\r\nHost: localhost\r\n\r\n")
+var rawPOST = []byte("POST /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\r\n{\"name\":\"scripts-image\"}")
+var rawUnknownPath = []byte("PATCH /api/router_v1/unknown/endpoint HTTP/1.1\r\nHost: localhost\r\n\r\n")
 
 // ============================================================
 // 连接建立测试
@@ -151,8 +155,8 @@ func TestClientProxy_EstablishConnection(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	resp, err := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId:     "test-user",
-		DeviceUuid: "test-device-001",
+		UserId:     "scripts-user",
+		DeviceUuid: "scripts-device-001",
 		Ip:         "10.0.0.1",
 		OsType:     "linux",
 		Timestamp:  time.Now().UnixMilli(),
@@ -175,7 +179,7 @@ func TestClientProxy_EstablishConnection_UnknownDevice(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	resp, err := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId:     "test-user",
+		UserId:     "scripts-user",
 		DeviceUuid: "unknown-device-999",
 		Ip:         "10.0.0.1",
 		OsType:     "linux",
@@ -200,7 +204,7 @@ func TestClientProxy_ProxyStream_GET_L0(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -213,8 +217,8 @@ func TestClientProxy_ProxyStream_GET_L0(t *testing.T) {
 	}
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: rawGET,
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -240,7 +244,7 @@ func TestClientProxy_ProxyStream_DELETE_L2(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -250,8 +254,8 @@ func TestClientProxy_ProxyStream_DELETE_L2(t *testing.T) {
 	stream, _ := client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: rawDELETE,
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -277,7 +281,7 @@ func TestClientProxy_ProxyStream_POST_L1(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -287,8 +291,8 @@ func TestClientProxy_ProxyStream_POST_L1(t *testing.T) {
 	stream, _ := client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: rawPOST,
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -314,7 +318,7 @@ func TestClientProxy_FingerprintMismatch(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	resp, err := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId:     "test-user",
+		UserId:     "scripts-user",
 		DeviceUuid: "hacker-device-999",
 		Ip:         "10.0.0.1",
 		OsType:     "linux",
@@ -339,7 +343,7 @@ func TestClientProxy_UnknownPath_DefaultsToL1(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -349,8 +353,8 @@ func TestClientProxy_UnknownPath_DefaultsToL1(t *testing.T) {
 	stream, _ := client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: rawUnknownPath,
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -376,7 +380,7 @@ func TestClientProxy_CloseConnection(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -386,8 +390,8 @@ func TestClientProxy_CloseConnection(t *testing.T) {
 	stream, _ := client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: rawGET,
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -417,7 +421,7 @@ func TestClientProxy_Concurrent(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, _ := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if !connResp.Accepted {
@@ -439,8 +443,8 @@ func TestClientProxy_Concurrent(t *testing.T) {
 			}
 			s.Send(&pb.ProxyRequest{
 				ConnectionId:   connResp.ConnectionId,
-				DeviceUuid:     "test-device-001",
-				UserId:         "test-user",
+				DeviceUuid:     "scripts-device-001",
+				UserId:         "scripts-user",
 				RawHttpRequest: rawGET,
 				Timestamp:      time.Now().UnixMilli(),
 			})
@@ -474,7 +478,7 @@ func TestClientProxy_FingerprintInjection(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, err := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -490,8 +494,8 @@ func TestClientProxy_FingerprintInjection(t *testing.T) {
 	}
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\n\r\n"),
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -526,7 +530,7 @@ func TestClientProxy_FingerprintAllDimensions(t *testing.T) {
 	directClient := pb.NewSecurityProxyClient(directConn)
 
 	connResp, err := directClient.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -539,11 +543,11 @@ func TestClientProxy_FingerprintAllDimensions(t *testing.T) {
 	stream, _ := directClient.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
-			"X-Proxy-UUID: test-device-001\r\n" +
+			"X-Proxy-UUID: scripts-device-001\r\n" +
 			"X-Proxy-OS: linux\r\n" +
 			"X-Proxy-IP: 10.0.0.1\r\n" +
 			"\r\n"),
@@ -571,7 +575,7 @@ func TestFingerprint_WrongUUID(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -584,8 +588,8 @@ func TestFingerprint_WrongUUID(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
 			"X-Proxy-UUID: WRONG-UUID-999\r\n" +
@@ -612,7 +616,7 @@ func TestFingerprint_WrongIP(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -625,11 +629,11 @@ func TestFingerprint_WrongIP(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
-			"X-Proxy-UUID: test-device-001\r\n" +
+			"X-Proxy-UUID: scripts-device-001\r\n" +
 			"X-Proxy-OS: linux\r\n" +
 			"X-Proxy-IP: 192.168.99.99\r\n" +
 			"\r\n"),
@@ -653,7 +657,7 @@ func TestFingerprint_WrongOS(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -666,11 +670,11 @@ func TestFingerprint_WrongOS(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
-			"X-Proxy-UUID: test-device-001\r\n" +
+			"X-Proxy-UUID: scripts-device-001\r\n" +
 			"X-Proxy-OS: windows\r\n" +
 			"X-Proxy-IP: 10.0.0.1\r\n" +
 			"\r\n"),
@@ -694,7 +698,7 @@ func TestFingerprint_MissingOSAndIP(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -707,11 +711,11 @@ func TestFingerprint_MissingOSAndIP(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
-			"X-Proxy-UUID: test-device-001\r\n" +
+			"X-Proxy-UUID: scripts-device-001\r\n" +
 			"\r\n"),
 		Timestamp: time.Now().UnixMilli(),
 	})
@@ -735,7 +739,7 @@ func TestFingerprint_AllFieldsWrong(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -748,8 +752,8 @@ func TestFingerprint_AllFieldsWrong(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
 			"X-Proxy-UUID: fake-device-999\r\n" +
@@ -776,7 +780,7 @@ func TestFingerprint_EmptyRawRequest(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -789,8 +793,8 @@ func TestFingerprint_EmptyRawRequest(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId:   connResp.ConnectionId,
-		DeviceUuid:     "test-device-001",
-		UserId:         "test-user",
+		DeviceUuid:     "scripts-device-001",
+		UserId:         "scripts-user",
 		RawHttpRequest: []byte{},
 		Timestamp:      time.Now().UnixMilli(),
 	})
@@ -813,7 +817,7 @@ func TestFingerprint_NoHeadersAtAll(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -826,8 +830,8 @@ func TestFingerprint_NoHeadersAtAll(t *testing.T) {
 	stream, _ := dCli.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
 			"Accept: application/json\r\n" +
@@ -853,7 +857,7 @@ func TestFingerprint_ViaClientProxy_TamperedHeader(t *testing.T) {
 
 	client := idvClient(t, env.clientProxy.ListenAddr())
 	connResp, err := client.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -866,8 +870,8 @@ func TestFingerprint_ViaClientProxy_TamperedHeader(t *testing.T) {
 	stream, _ := client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
 		ConnectionId: connResp.ConnectionId,
-		DeviceUuid:   "test-device-001",
-		UserId:       "test-user",
+		DeviceUuid:   "scripts-device-001",
+		UserId:       "scripts-user",
 		RawHttpRequest: []byte("GET /api/cloud/public/images HTTP/1.1\r\n" +
 			"Host: localhost\r\n" +
 			"X-Proxy-UUID: TAMPERED-FAKE-UUID\r\n" +
@@ -892,7 +896,7 @@ func TestFingerprint_MixedBatch_Concurrent(t *testing.T) {
 
 	dCli := directClient(t, env.srvAddr)
 	connResp, err := dCli.EstablishConnection(context.Background(), &pb.ConnectionInit{
-		UserId: "test-user", DeviceUuid: "test-device-001",
+		UserId: "scripts-user", DeviceUuid: "scripts-device-001",
 		Ip: "10.0.0.1", OsType: "linux", Timestamp: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -909,16 +913,16 @@ func TestFingerprint_MixedBatch_Concurrent(t *testing.T) {
 	}
 
 	cases := []testCase{
-		{"valid", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
-		{"valid2", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
+		{"valid", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
+		{"valid2", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
 		{"wrong-uuid", "X-Proxy-UUID: not-my-device\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", false},
-		{"wrong-ip", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 99.99.99.99", false},
-		{"wrong-os", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: windows\r\nX-Proxy-IP: 10.0.0.1", false},
+		{"wrong-ip", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 99.99.99.99", false},
+		{"wrong-os", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: windows\r\nX-Proxy-IP: 10.0.0.1", false},
 		{"no-headers", "", false},
-		{"valid3", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
+		{"valid3", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
 		{"all-wrong", "X-Proxy-UUID: fake\r\nX-Proxy-OS: freebsd\r\nX-Proxy-IP: 1.2.3.4", false},
 		{"empty-uuid", "X-Proxy-UUID: \r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", false},
-		{"valid4", "X-Proxy-UUID: test-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
+		{"valid4", "X-Proxy-UUID: scripts-device-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1", true},
 	}
 
 	var wg sync.WaitGroup
@@ -947,8 +951,8 @@ func TestFingerprint_MixedBatch_Concurrent(t *testing.T) {
 			}
 			stream.Send(&pb.ProxyRequest{
 				ConnectionId:   connResp.ConnectionId,
-				DeviceUuid:     "test-device-001",
-				UserId:         "test-user",
+				DeviceUuid:     "scripts-device-001",
+				UserId:         "scripts-user",
 				RawHttpRequest: []byte(raw),
 				Timestamp:      time.Now().UnixMilli(),
 			})

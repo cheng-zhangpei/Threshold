@@ -14,7 +14,7 @@ func strPtr(s string) *string {
 
 func newTestTree(t *testing.T) (*Tree, func()) {
 	t.Helper()
-	tmpFile, err := os.CreateTemp("", "fp-test-*.db")
+	tmpFile, err := os.CreateTemp("", "fp-scripts-*.db")
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMatch_NullDimensionSkip(t *testing.T) {
 	fp := types.DeviceFingerprint{
 		IP:   strPtr("10.0.0.1"),
 		Port: strPtr("8080"),
-		UUID: strPtr("device-null-test"),
+		UUID: strPtr("device-null-scripts"),
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
@@ -123,7 +123,7 @@ func TestMatch_NullDimensionSkip(t *testing.T) {
 		OS:   strPtr("linux"),
 		IP:   strPtr("10.0.0.1"),
 		Port: strPtr("8080"),
-		UUID: strPtr("device-null-test"),
+		UUID: strPtr("device-null-scripts"),
 	}
 	if tree.Match(withOS) {
 		t.Error("should not match: registered without OS but queried with OS")

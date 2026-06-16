@@ -1,6 +1,8 @@
 package grpc
 
 import (
+	router_v1 "Threshold/server/router/router_v1"
+	"Threshold/server/router/router_v2"
 	"context"
 	"fmt"
 	"log"
@@ -16,7 +18,6 @@ import (
 	"Threshold/server/fingerprint"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
-	"Threshold/server/router"
 
 	pb "Threshold/pkg/proto/pb"
 )
@@ -29,7 +30,8 @@ type Handler struct {
 
 	fpTree     *fingerprint.Tree
 	engine     *decision.Engine
-	r          *router.Router
+	r          *router_v1.Router
+	r2         *router_v2.Router
 	outputBuf  *output.OutputBuffer
 	alertQueue *alert.AlertQueue
 	portrait   *portrait.Store
@@ -40,16 +42,19 @@ type Handler struct {
 func NewHandler(
 	fpTree *fingerprint.Tree,
 	engine *decision.Engine,
-	r *router.Router,
+	r *router_v1.Router,
+	r2 *router_v2.Router,
 	outputBuf *output.OutputBuffer,
 	alertQueue *alert.AlertQueue,
 	portraitStore *portrait.Store,
 ) *Handler {
+
 	return &Handler{
 		connections: make(map[string]*types.ConnectionContext),
 		fpTree:      fpTree,
 		engine:      engine,
 		r:           r,
+		r2:          r2,
 		outputBuf:   outputBuf,
 		alertQueue:  alertQueue,
 		portrait:    portraitStore,
@@ -64,7 +69,10 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 	if req.UserId == "" || req.DeviceUuid == "" {
 		return &pb.ConnectionAck{Accepted: false, Reason: "missing user_id or device_uuid"}, nil
 	}
-
+	protocol := req.Protocol
+	if protocol == "" {
+		protocol = "http"
+	}
 	connIP := req.Ip
 	fp := types.DeviceFingerprint{OS: &req.OsType, IP: &connIP, UUID: &req.DeviceUuid}
 	if !h.fpTree.Match(fp) {
@@ -75,7 +83,7 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 	connID := fmt.Sprintf("conn-%s-%d", req.DeviceUuid[:8], time.Now().UnixMilli())
 	connCtx := &types.ConnectionContext{
 		ConnectionID: connID, UserID: req.UserId, DeviceUUID: req.DeviceUuid,
-		ConnectedAt: time.UnixMilli(req.Timestamp), IP: req.Ip,
+		ConnectedAt: time.UnixMilli(req.Timestamp), IP: req.Ip, Protocol: protocol,
 	}
 
 	h.mu.Lock()
@@ -95,58 +103,108 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			return err
 		}
 
-		parsed, err := types.ParseProxyRequest(req.ConnectionId, req.DeviceUuid, req.UserId, req.Timestamp, req.RawHttpRequest)
-		if err != nil {
-			log.Printf("parse request: %v", err)
-			return status.Errorf(codes.InvalidArgument, "parse request: %v", err)
-		}
-
-		// Step 1: fingerprint check
-		if !h.fpTree.Match(parsed.Fingerprint) {
-			log.Println("device not registered!")
-			stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: pb.Status_BLOCKED, Reason: "fingerprint mismatch"})
+		// 获取连接上下文
+		h.mu.RLock()
+		connCtx, exists := h.connections[req.ConnectionId]
+		h.mu.RUnlock()
+		if !exists {
+			stream.Send(&pb.ProxyResponse{
+				ConnectionId: req.ConnectionId,
+				Status:       pb.Status_BLOCKED,
+				Reason:       "unknown connection",
+			})
 			continue
 		}
 
-		// Step 2: record event
-		h.mu.RLock()
-		connCtx := h.connections[parsed.ConnectionID]
-		h.mu.RUnlock()
+		// ========== HTTP 分支（使用旧的 router_v1） ==========
+		if connCtx.Protocol == "http" {
+			parsed, err := types.ParseProxyRequest(req.ConnectionId, req.DeviceUuid, req.UserId, req.Timestamp, req.RawHttpRequest)
+			if err != nil {
+				log.Printf("parse HTTP request: %v", err)
+				return status.Errorf(codes.InvalidArgument, "parse request: %v", err)
+			}
+			// 记录事件
+			h.mu.RLock()
+			connCtx = h.connections[parsed.ConnectionID]
+			h.mu.RUnlock()
+			if connCtx != nil {
+				connCtx.RecordEvent(parsed.OpKey)
+			}
+			// 路由（旧 router）
+			if h.r == nil {
+				log.Println("[Server]the router is not enabled")
+				continue
+			}
+			riskLevel := h.r.Classify(parsed)
+			var decisionResult *types.Decision
+			if riskLevel == types.L0 {
+				decisionResult = &types.Decision{Action: types.ALLOW, Reason: "L0 direct pass", RuleID: "L0"}
+				h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
+			} else {
+				var history []*types.ConnectionSummary
+				if h.portrait != nil {
+					history = h.portrait.GetHistory(parsed.UserID, 20)
+				}
+				if h.engine != nil {
+					decisionResult = h.engine.Evaluate(connCtx, history, riskLevel)
+					switch decisionResult.Action {
+					case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
+						h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
+					default:
+						h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
+					}
+				}
+				respStatus := pb.Status_OK
+				reason := decisionResult.Reason
+				switch decisionResult.Action {
+				case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
+					respStatus = pb.Status_BLOCKED
+				case types.REQUIRE_2FA, types.BLOCK_LOGIN:
+					respStatus = pb.Status_RATE_LIMITED
+				}
+				stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: respStatus, Reason: reason})
+			}
+			continue
+			// 响应
+		}
+		// ========== TCP 分支（使用新的 router_v2） ==========
+		// 构造 ParsedRequest（TCP 语义）
+		// 注：目标地址目前占位，后续可从 connCtx.TargetAddr 获取
+		targetAddr := "tcp" // 占位，稍后可从 connCtx 获取真实地址
+		parsed := &types.ParsedRequest{
+			ConnectionID: req.ConnectionId,
+			DeviceUUID:   req.DeviceUuid,
+			UserID:       req.UserId,
+			Timestamp:    time.UnixMilli(req.Timestamp),
+			Method:       "TCP",
+			Path:         targetAddr,
+			OpKey:        "TCP " + targetAddr,
+			Body:         req.RawHttpRequest,
+			Headers:      make(map[string]string),
+		}
+
+		// 记录事件
 		if connCtx != nil {
 			connCtx.RecordEvent(parsed.OpKey)
 		}
 
-		// Step 3: route
-		riskLevel := h.r.Classify(parsed)
-
+		// 路由（新 router）
+		if h.r2 == nil {
+			log.Println("[Server]the router is not enabled")
+			continue
+		}
+		riskLevel := h.r2.Classify(parsed)
 		var decisionResult *types.Decision
 		if riskLevel == types.L0 {
-			decisionResult = &types.Decision{Action: types.ALLOW, Reason: "L0 direct pass", RuleID: "L0"}
+			decisionResult = &types.Decision{Action: types.ALLOW, Reason: "TCP L0 direct pass", RuleID: "L0"}
 			h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
 		} else {
-			// Fetch history from portrait store for decision engine
-			history := h.portrait.GetHistory(parsed.UserID, 20)
-			decisionResult = h.engine.Evaluate(connCtx, history, riskLevel)
-
-			switch decisionResult.Action {
-			case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE, types.ALERT, types.QUARANTINE_AND_ALERT:
-				h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
-			default:
-				h.outputBuf.Put(output.Message{Request: parsed, Decision: decisionResult})
-			}
+			// TODO(cheng): 重新设计 engine + portrait 的交互方式
+			// 目标：让 ProxyStream 不再关心内部细节，只负责调用
+			// 1. 从 portrait 获取历史画像
+			// 2. 调用 engine 得到 Decision
+			// 3. 统一处理后分发 (OutputBuffer / AlertQueue)
 		}
-
-		// Step 4: map to gRPC response
-		respStatus := pb.Status_OK
-		reason := decisionResult.Reason
-		switch decisionResult.Action {
-		case types.BLOCK, types.BLOCK_DEVICE, types.BLACKLIST_DEVICE:
-			respStatus = pb.Status_BLOCKED
-		case types.REQUIRE_2FA, types.BLOCK_LOGIN:
-			respStatus = pb.Status_RATE_LIMITED
-		}
-
-		stream.Send(&pb.ProxyResponse{ConnectionId: parsed.ConnectionID, Status: respStatus, Reason: reason})
 	}
 }
 
@@ -268,6 +326,7 @@ func (h *Handler) BroadcastNotify(event *pb.NotifyEvent) {
 
 // ============================================================
 // Admin: Device management
+// TODO 后面这些接口全部都要改，改为管理员接口，这个必须在server启动的时候就动态注入进去的
 // ============================================================
 
 func (h *Handler) RegisterDevice(ctx context.Context, req *pb.RegisterDeviceRequest) (*pb.RegisterDeviceResponse, error) {

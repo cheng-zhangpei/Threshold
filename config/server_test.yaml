@@ -17,10 +17,10 @@ dispatch:
   health_check_interval_sec: 5
 
 fingerprint:
-  db_path: "data/test-fingerprint.db"
+  db_path: "data/scripts-fingerprint.db"
 
 portrait:
-  db_path: "data/test-portrait.db"
+  db_path: "data/scripts-portrait.db"
   history_limit: 10
 
 output:

@@ -10,7 +10,7 @@ import (
 
 func newTestStore(t *testing.T) Store {
 	t.Helper()
-	tmpFile, err := os.CreateTemp("", "wal-test-*.db")
+	tmpFile, err := os.CreateTemp("", "wal-scripts-*.db")
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
@@ -102,9 +102,9 @@ func TestWAL_SequenceIncrement(t *testing.T) {
 	store := newTestStore(t)
 	wal := NewWAL(store)
 
-	seq1, _ := wal.Begin("conn-001", WLOpPut, "test", "k1", []byte("v1"))
-	seq2, _ := wal.Begin("conn-001", WLOpPut, "test", "k2", []byte("v2"))
-	seq3, _ := wal.Begin("conn-002", WLOpPut, "test", "k3", []byte("v3"))
+	seq1, _ := wal.Begin("conn-001", WLOpPut, "scripts", "k1", []byte("router_v1"))
+	seq2, _ := wal.Begin("conn-001", WLOpPut, "scripts", "k2", []byte("router_v2"))
+	seq3, _ := wal.Begin("conn-002", WLOpPut, "scripts", "k3", []byte("v3"))
 
 	if seq1 != 1 || seq2 != 2 || seq3 != 1 {
 		t.Errorf("seqs = %d, %d, %d; want 1, 2, 1", seq1, seq2, seq3)

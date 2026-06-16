@@ -1,4 +1,4 @@
-﻿package dispatch
+package dispatch
 
 import (
 	"os"
@@ -14,7 +14,7 @@ import (
 
 func newTestStore(t *testing.T) storage.Store {
 	t.Helper()
-	tmpFile, _ := os.CreateTemp("", "dispatch-test-*.db")
+	tmpFile, _ := os.CreateTemp("", "dispatch-scripts-*.db")
 	tmpFile.Close()
 	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 	store, err := storage.NewBoltStore(tmpFile.Name())
@@ -132,7 +132,7 @@ func TestTaskStore_PendingCount(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		parsed := newTestParsedRequest("c", "POST", "/api/test")
+		parsed := newTestParsedRequest("c", "POST", "/api/scripts")
 		ts.Overflow(OverflowTask{Parsed: parsed, Risk: types.L1})
 	}
 
@@ -150,14 +150,14 @@ func TestDispatchManager_EnqueueAndProcess(t *testing.T) {
 	store := newTestStore(t)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
 		DecisionFn: func(_ *types.ConnectionContext, _ []*types.ConnectionSummary, _ types.RiskLevel) *types.Decision {
-			return &types.Decision{Action: types.ALLOW, Reason: "test-ok", RuleID: "test"}
+			return &types.Decision{Action: types.ALLOW, Reason: "scripts-ok", RuleID: "scripts"}
 		},
 	})
 	defer dm.Shutdown()
@@ -168,8 +168,8 @@ func TestDispatchManager_EnqueueAndProcess(t *testing.T) {
 	if decision.Action != types.ALLOW {
 		t.Errorf("action = %d, want ALLOW", decision.Action)
 	}
-	if decision.Reason != "test-ok" {
-		t.Errorf("reason = %q, want test-ok", decision.Reason)
+	if decision.Reason != "scripts-ok" {
+		t.Errorf("reason = %q, want scripts-ok", decision.Reason)
 	}
 }
 
@@ -177,9 +177,9 @@ func TestDispatchManager_ConcurrentEnqueue(t *testing.T) {
 	store := newTestStore(t)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           4,
-			MaxWorkers:           16,
-			MaxQueueSize:         256,
+			MinWorkers:             4,
+			MaxWorkers:             16,
+			MaxQueueSize:           256,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
@@ -214,9 +214,9 @@ func TestDispatchManager_OverflowToStorage(t *testing.T) {
 	store := newTestStore(t)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           1,
-			MaxWorkers:           2,
-			MaxQueueSize:         4,
+			MinWorkers:             1,
+			MaxWorkers:             2,
+			MaxQueueSize:           4,
 			HealthCheckIntervalSec: 1,
 		},
 		Store: store,
@@ -252,13 +252,13 @@ func TestDispatchManager_ScaleUp(t *testing.T) {
 	store := newTestStore(t)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           1,
-			MaxWorkers:           8,
-			ScaleUpThreshold:     5,
-			ScaleUpStep:          2,
-			ScaleDownThreshold:   1,
-			ScaleDownStep:        1,
-			MaxQueueSize:         128,
+			MinWorkers:             1,
+			MaxWorkers:             8,
+			ScaleUpThreshold:       5,
+			ScaleUpStep:            2,
+			ScaleDownThreshold:     1,
+			ScaleDownStep:          1,
+			MaxQueueSize:           128,
 			HealthCheckIntervalSec: 1,
 		},
 		Store: store,
@@ -300,9 +300,9 @@ func TestDispatch_WithEngine_StaticRisk_L0_Allow(t *testing.T) {
 	decisionFn := newEngineDecisionFn(store)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store:      store,
@@ -325,9 +325,9 @@ func TestDispatch_WithEngine_StaticRisk_L1_Audit(t *testing.T) {
 	store := newTestStore(t)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
@@ -354,9 +354,9 @@ func TestDispatch_WithEngine_StaticRisk_L2_Alert(t *testing.T) {
 	decisionFn := newEngineDecisionFn(store)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store:      store,
@@ -378,9 +378,9 @@ func TestDispatch_WithEngine_R07_BulkDelete(t *testing.T) {
 	engine := decision.NewEngine(ps)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           1,
-			MaxWorkers:           2,
-			MaxQueueSize:         64,
+			MinWorkers:             1,
+			MaxWorkers:             2,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
@@ -410,9 +410,9 @@ func TestDispatch_WithEngine_R08_UploadThenStart(t *testing.T) {
 	engine := decision.NewEngine(ps)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           1,
-			MaxWorkers:           2,
-			MaxQueueSize:         64,
+			MinWorkers:             1,
+			MaxWorkers:             2,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
@@ -437,9 +437,9 @@ func TestDispatch_WithEngine_NormalGet_Allow(t *testing.T) {
 	decisionFn := newEngineDecisionFn(store)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store:      store,
@@ -460,9 +460,9 @@ func TestDispatch_WithEngine_ConcurrentMixedRisk(t *testing.T) {
 	decisionFn := newEngineDecisionFn(store)
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           4,
-			MaxWorkers:           8,
-			MaxQueueSize:         128,
+			MinWorkers:             4,
+			MaxWorkers:             8,
+			MaxQueueSize:           128,
 			HealthCheckIntervalSec: 5,
 		},
 		Store:      store,
@@ -527,9 +527,9 @@ func TestDispatch_WithEngine_OverflowPreservesDecision(t *testing.T) {
 
 	dm := NewDispatchManager(DispatcherConfig{
 		Policy: PoolPolicy{
-			MinWorkers:           1,
-			MaxWorkers:           2,
-			MaxQueueSize:         4,
+			MinWorkers:             1,
+			MaxWorkers:             2,
+			MaxQueueSize:           4,
 			HealthCheckIntervalSec: 1,
 		},
 		Store: store,

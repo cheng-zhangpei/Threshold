@@ -30,7 +30,7 @@ go build -o threshold-client ./cmd/client/
 ### 启动 Server
 
 ```bash
-./threshold-server config/server.yaml
+./threshold-server configs/server.yaml
 ```
 
 默认监听 :50051，读取 config/server.yaml 配置。
@@ -38,7 +38,7 @@ go build -o threshold-client ./cmd/client/
 ### 启动 Client
 
 ```bash
-./threshold-client config/client.yaml
+./threshold-client configs/client.yaml
 ```
 
 默认监听 :9090（供 IDV Client 连接），连接 Server localhost:50051。
@@ -101,11 +101,11 @@ Proto 定义在 pkg/proto/proxy.proto，生成的 Go 代码在 pkg/proto/pb/。
 
 ```bash
 # 全量测试
-go test ./... -count=1
+go scripts ./... -count=1
 
 # Client-Server 联调测试
-go test ./cmd/client/ -v -count=1 -run TestClientProxy
+go scripts ./cmd/client/ -v -count=1 -run TestClientProxy
 
 # Server 端到端测试
-go test ./cmd/server/ -v -count=1 -run TestIntegration
+go scripts ./cmd/server/ -v -count=1 -run TestIntegration
 ```

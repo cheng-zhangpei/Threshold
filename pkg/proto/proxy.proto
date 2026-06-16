@@ -83,6 +83,8 @@ message ProxyRequest {
 
     // timestamp 请求发起时间戳（Unix 毫秒）
     int64 timestamp = 6;
+
+    
 }
 
 // ============================================================
@@ -139,6 +141,7 @@ message ConnectionInit {
 
     // timestamp 连接发起时间戳（Unix 毫秒）
     int64 timestamp = 5;
+    string protocol = 6;   // "http", "https", "tcp", "mysql", ...
 }
 
 // ============================================================

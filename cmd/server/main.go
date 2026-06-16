@@ -1,6 +1,8 @@
 package main
 
 import (
+	"Threshold/server/router/router_v1"
+	"Threshold/server/router/router_v2"
 	"fmt"
 	"io"
 	"log"
@@ -15,25 +17,23 @@ import (
 	"Threshold/server/decision"
 	"Threshold/server/dispatch"
 	"Threshold/server/fingerprint"
+	servergrpc "Threshold/server/grpc"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
-	"Threshold/server/router"
-
-	servergrpc "Threshold/server/grpc"
 )
 
 func main() {
-	cfgPath := "config/server.yaml"
+	cfgPath := "configs/server.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]
 	}
 
 	cfg, err := config.LoadServerConfig(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "load configs: %v\n", err)
 		os.Exit(1)
 	}
-	file, err := os.OpenFile("/var/log/myapp.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile("./log/server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,9 +62,14 @@ func main() {
 	fmt.Printf("fingerprint tree loaded\n%s", fpTree.Print())
 
 	// --- 用户画像 + 决策引擎 ---
-	ps := portrait.NewStore(store)
-	engine := decision.NewEngine(ps)
-
+	var ps *portrait.Store
+	if cfg.Portrait.Enable {
+		ps = portrait.NewStore(store)
+	}
+	var engine *decision.Engine
+	if cfg.Portrait.Enable {
+		engine = decision.NewEngine(ps)
+	}
 	// --- 输出缓冲 + 告警队列 ---
 	outputBuf := output.NewOutputBuffer()
 	alertQueue := alert.NewAlertQueue()
@@ -79,25 +84,44 @@ func main() {
 		IdleTimeoutSec:         cfg.Dispatch.IdleTimeoutSec,
 		HealthCheckIntervalSec: cfg.Dispatch.HealthCheckIntervalSec,
 	})
-
-	dm := dispatch.NewDispatchManager(dispatch.DispatcherConfig{
-		Policy: policy,
-		Store:  store,
-		DecisionFn: func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision {
-			return engine.Evaluate(ctx, history, riskLevel)
-		},
-	})
-	defer dm.Shutdown()
+	var dm *dispatch.DispatchManager
+	if cfg.Dispatch.Enabled {
+		dm = dispatch.NewDispatchManager(dispatch.DispatcherConfig{
+			Policy: policy,
+			Store:  store,
+			DecisionFn: func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision {
+				return engine.Evaluate(ctx, history, riskLevel)
+			},
+		})
+		defer dm.Shutdown()
+	}
 
 	// --- Router: 事件消费型路由 ---
-	riskTable := router.NewOperationRiskTable()
-	r := router.NewRouter(riskTable, outputBuf, dm, cfg.Router.Consumers, cfg.Router.QueueSize)
-	defer r.Shutdown()
+	riskTable := router_v1.NewOperationRiskTable()
+	var r *router_v1.Router
+	var r2 *router_v2.Router
+	if cfg.Router.Enabled {
+		r = router_v1.NewRouter(riskTable, outputBuf, dm, cfg.Router.Consumers, cfg.Router.QueueSize)
+		defer r.Shutdown()
+		if cfg.Router.R2Config != "" {
+			r2, err = router_v2.NewRouterFromFile(
+				cfg.Router.R2Config,
+				outputBuf,
+				dm,
+				3,    // consumers
+				4096, // queueSize
+			)
+			defer r2.Shutdown()
+		}
 
-	fmt.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
+		if err != nil {
+			log.Fatalf("init router_v2: %v", err)
+		}
+		fmt.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
+	}
 
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, outputBuf, alertQueue, ps)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)

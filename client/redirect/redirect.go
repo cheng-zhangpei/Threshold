@@ -1,4 +1,4 @@
-﻿package redirect
+package redirect
 
 import (
 	"fmt"
@@ -40,9 +40,9 @@ func (m *Module) setupProxychains() error {
 	fmt.Fprintf(&sb, "socks5 127.0.0.1 %d", m.localPort)
 	sb.WriteByte(10)
 	if err := os.WriteFile(cfgPath, []byte(sb.String()), 0644); err != nil {
-		return fmt.Errorf("write proxychains config: %w", err)
+		return fmt.Errorf("write proxychains configs: %w", err)
 	}
-	log.Printf("[REDIRECT] proxychains config written to %s", cfgPath)
+	log.Printf("[REDIRECT] proxychains configs written to %s", cfgPath)
 	fmt.Println("[REDIRECT] usage: proxychains4 <your-command>")
 	return nil
 }

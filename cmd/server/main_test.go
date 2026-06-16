@@ -1,6 +1,8 @@
 package main
 
 import (
+	"Threshold/server/router/router_v1"
+	"Threshold/server/router/router_v2"
 	"context"
 	"fmt"
 	"net"
@@ -21,10 +23,9 @@ import (
 	"Threshold/server/fingerprint"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
-	"Threshold/server/router"
 
-	servergrpc "Threshold/server/grpc"
 	pb "Threshold/pkg/proto/pb"
+	servergrpc "Threshold/server/grpc"
 )
 
 // ============================================================
@@ -46,7 +47,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	tmpDir, _ := os.MkdirTemp("", "server-integration-*")
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
-	store, err := storage.NewBoltStore(filepath.Join(tmpDir, "test.db"))
+	store, err := storage.NewBoltStore(filepath.Join(tmpDir, "scripts.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 
-	testUUID := "test-device-uuid-001"
+	testUUID := "scripts-device-uuid-001"
 	testOS := "linux"
 	testIP := "10.0.0.1"
 	fp := types.DeviceFingerprint{UUID: &testUUID, OS: &testOS, IP: &testIP}
@@ -73,9 +74,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	dm := dispatch.NewDispatchManager(dispatch.DispatcherConfig{
 		Policy: dispatch.PoolPolicy{
-			MinWorkers:           2,
-			MaxWorkers:           8,
-			MaxQueueSize:         64,
+			MinWorkers:             2,
+			MaxWorkers:             8,
+			MaxQueueSize:           64,
 			HealthCheckIntervalSec: 5,
 		},
 		Store: store,
@@ -84,11 +85,11 @@ func setupTestEnv(t *testing.T) *testEnv {
 		},
 	})
 
-	riskTable := router.NewOperationRiskTable()
-	r := router.NewRouter(riskTable, outputBuf, dm, 2, 256)
-
+	riskTable := router_v1.NewOperationRiskTable()
+	r := router_v1.NewRouter(riskTable, outputBuf, dm, 2, 256)
+	var r2 *router_v2.Router = nil
 	grpcSrv := grpc.NewServer()
-	handler := servergrpc.NewHandler(fpTree, engine, r, outputBuf, alertQueue, ps)
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps)
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 
 	lis, err := net.Listen("tcp", ":0")
@@ -117,13 +118,13 @@ func setupTestEnv(t *testing.T) *testEnv {
 }
 
 func testFingerprintHeaders() []byte {
-	return []byte("GET /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nX-Proxy-UUID: test-device-uuid-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1\r\n\r\n")
+	return []byte("GET /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nX-Proxy-UUID: scripts-device-uuid-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1\r\n\r\n")
 }
 
 func testConnInit() *pb.ConnectionInit {
 	return &pb.ConnectionInit{
-		UserId:     "test-user",
-		DeviceUuid: "test-device-uuid-001",
+		UserId:     "scripts-user",
+		DeviceUuid: "scripts-device-uuid-001",
 		Ip:         "10.0.0.1",
 		OsType:     "linux",
 		Timestamp:  time.Now().UnixMilli(),
@@ -159,8 +160,8 @@ func TestIntegration_ProxyStream_GET_L0(t *testing.T) {
 
 	stream, _ := e.client.ProxyStream(context.Background())
 	stream.Send(&pb.ProxyRequest{
-		ConnectionId: connResp.ConnectionId, DeviceUuid: "test-device-uuid-001",
-		UserId: "test-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
+		ConnectionId: connResp.ConnectionId, DeviceUuid: "scripts-device-uuid-001",
+		UserId: "scripts-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
 	})
 
 	resp, err := stream.Recv()
@@ -178,10 +179,10 @@ func TestIntegration_ProxyStream_DELETE_L2(t *testing.T) {
 	connResp, _ := e.client.EstablishConnection(context.Background(), testConnInit())
 
 	stream, _ := e.client.ProxyStream(context.Background())
-	rawHTTP := []byte("DELETE /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nX-Proxy-UUID: test-device-uuid-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1\r\n\r\n")
+	rawHTTP := []byte("DELETE /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nX-Proxy-UUID: scripts-device-uuid-001\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1\r\n\r\n")
 	stream.Send(&pb.ProxyRequest{
-		ConnectionId: connResp.ConnectionId, DeviceUuid: "test-device-uuid-001",
-		UserId: "test-user", RawHttpRequest: rawHTTP, Timestamp: time.Now().UnixMilli(),
+		ConnectionId: connResp.ConnectionId, DeviceUuid: "scripts-device-uuid-001",
+		UserId: "scripts-user", RawHttpRequest: rawHTTP, Timestamp: time.Now().UnixMilli(),
 	})
 
 	resp, _ := stream.Recv()
@@ -195,8 +196,8 @@ func TestIntegration_ProxyStream_FingerprintMismatch(t *testing.T) {
 	stream, _ := e.client.ProxyStream(context.Background())
 	rawHTTP := []byte("GET /api/cloud/public/images HTTP/1.1\r\nHost: localhost\r\nX-Proxy-UUID: wrong-device-uuid\r\nX-Proxy-OS: linux\r\nX-Proxy-IP: 10.0.0.1\r\n\r\n")
 	stream.Send(&pb.ProxyRequest{
-		ConnectionId: connResp.ConnectionId, DeviceUuid: "test-device-uuid-001",
-		UserId: "test-user", RawHttpRequest: rawHTTP, Timestamp: time.Now().UnixMilli(),
+		ConnectionId: connResp.ConnectionId, DeviceUuid: "scripts-device-uuid-001",
+		UserId: "scripts-user", RawHttpRequest: rawHTTP, Timestamp: time.Now().UnixMilli(),
 	})
 
 	resp, _ := stream.Recv()
@@ -214,8 +215,8 @@ func TestIntegration_PullApproved(t *testing.T) {
 	stream, _ := e.client.ProxyStream(context.Background())
 	for i := 0; i < 3; i++ {
 		stream.Send(&pb.ProxyRequest{
-			ConnectionId: connResp.ConnectionId, DeviceUuid: "test-device-uuid-001",
-			UserId: "test-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
+			ConnectionId: connResp.ConnectionId, DeviceUuid: "scripts-device-uuid-001",
+			UserId: "scripts-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
 		})
 		stream.Recv()
 	}
@@ -228,7 +229,7 @@ func TestIntegration_PullApproved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pullStream.Send(&pb.PullRequest{SubscriberId: "test-sub", BatchSize: 10, Timestamp: time.Now().UnixMilli()})
+	pullStream.Send(&pb.PullRequest{SubscriberId: "scripts-sub", BatchSize: 10, Timestamp: time.Now().UnixMilli()})
 	pullStream.CloseSend()
 
 	count := 0
@@ -278,8 +279,8 @@ func TestIntegration_ConcurrentProxyStream(t *testing.T) {
 				return
 			}
 			stream.Send(&pb.ProxyRequest{
-				ConnectionId: connResp.ConnectionId, DeviceUuid: "test-device-uuid-001",
-				UserId: "test-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
+				ConnectionId: connResp.ConnectionId, DeviceUuid: "scripts-device-uuid-001",
+				UserId: "scripts-user", RawHttpRequest: testFingerprintHeaders(), Timestamp: time.Now().UnixMilli(),
 			})
 			resp, _ := stream.Recv()
 			if resp.Status != pb.Status_OK {

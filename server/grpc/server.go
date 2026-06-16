@@ -1,6 +1,8 @@
 package grpc
 
 import (
+	"Threshold/server/router/router_v1"
+	"Threshold/server/router/router_v2"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -10,14 +12,12 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"Threshold/pkg/config"
+	pb "Threshold/pkg/proto/pb"
 	"Threshold/server/alert"
 	"Threshold/server/decision"
 	"Threshold/server/fingerprint"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
-	"Threshold/server/router"
-
-	pb "Threshold/pkg/proto/pb"
 )
 
 type Server struct {
@@ -31,7 +31,8 @@ func New(
 	cfg *config.ServerConfig,
 	fpTree *fingerprint.Tree,
 	engine *decision.Engine,
-	r *router.Router,
+	r *router_v1.Router,
+	r2 *router_v2.Router,
 	outputBuf *output.OutputBuffer,
 	alertQueue *alert.AlertQueue,
 	portraitStore *portrait.Store,
@@ -54,7 +55,7 @@ func New(
 	}
 
 	grpcServer := grpc.NewServer(opts...)
-	handler := NewHandler(fpTree, engine, r, outputBuf, alertQueue, portraitStore)
+	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore)
 	pb.RegisterSecurityProxyServer(grpcServer, handler)
 
 	listener, err := net.Listen("tcp", cfg.GRPC.ListenAddr)

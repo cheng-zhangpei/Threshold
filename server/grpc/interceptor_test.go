@@ -17,7 +17,7 @@ func TestUnaryInterceptor_AllowsNormal(t *testing.T) {
 		called = true
 		return "ok", nil
 	}
-	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test/Method"}, handler)
+	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/scripts/Method"}, handler)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestUnaryInterceptor_RateLimit(t *testing.T) {
 		t.Error("handler should not be called")
 		return nil, nil
 	}
-	_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test/Method"}, handler)
+	_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/scripts/Method"}, handler)
 	if err == nil {
 		t.Fatal("expected rate limit error")
 	}
@@ -52,7 +52,7 @@ func TestUnaryInterceptor_NilLimiter(t *testing.T) {
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return "ok", nil
 	}
-	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test"}, handler)
+	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/scripts"}, handler)
 	if err != nil || resp != "ok" {
 		t.Errorf("nil limiter should pass through: resp=%v err=%v", resp, err)
 	}
@@ -64,7 +64,7 @@ func TestUnaryInterceptor_PanicRecovery(t *testing.T) {
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		panic("boom")
 	}
-	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test"}, handler)
+	resp, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/scripts"}, handler)
 	if resp != nil {
 		t.Errorf("resp = %v, want nil", resp)
 	}

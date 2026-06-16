@@ -28,23 +28,16 @@ type GRPCConfig struct {
 }
 
 // RouterConfig Router 路由配置
-type RouterConfig struct {
-	// Consumers 消费者 goroutine 数量，决定并发处理能力
-	Consumers int `yaml:"consumers"`
-	// QueueSize 缓冲队列容量，超过则触发背压
-	QueueSize int `yaml:"queue_size"`
-	// OperationRiskFile 静态风险映射表文件路径
-	OperationRiskFile string `yaml:"operation_risk_file"`
-}
 
 type DispatchConfig struct {
-	MinWorkers             int `yaml:"min_workers"`
-	MaxWorkers             int `yaml:"max_workers"`
-	ScaleUpThreshold       int `yaml:"scale_up_threshold"`
-	ScaleUpStep            int `yaml:"scale_up_step"`
-	MaxQueueSize           int `yaml:"max_queue_size"`
-	IdleTimeoutSec         int `yaml:"idle_timeout_sec"`
-	HealthCheckIntervalSec int `yaml:"health_check_interval_sec"`
+	Enabled                bool `yaml:"enabled"`
+	MinWorkers             int  `yaml:"min_workers"`
+	MaxWorkers             int  `yaml:"max_workers"`
+	ScaleUpThreshold       int  `yaml:"scale_up_threshold"`
+	ScaleUpStep            int  `yaml:"scale_up_step"`
+	MaxQueueSize           int  `yaml:"max_queue_size"`
+	IdleTimeoutSec         int  `yaml:"idle_timeout_sec"`
+	HealthCheckIntervalSec int  `yaml:"health_check_interval_sec"`
 }
 
 type FingerprintConfig struct {
@@ -52,6 +45,7 @@ type FingerprintConfig struct {
 }
 
 type PortraitConfig struct {
+	Enable       bool   `yaml:"enable"`
 	DBPath       string `yaml:"db_path"`
 	HistoryLimit int    `yaml:"history_limit"`
 }
@@ -129,10 +123,15 @@ func DefaultServerConfig() *ServerConfig {
 			BucketSize: 2000,
 		},
 		Router: RouterConfig{
-			Consumers: 4,
-			QueueSize: 4096,
+			Enabled:           true,
+			R2Config:          "configs/router_rules.yaml", // 默认配置文件路径
+			Rules:             nil,                         // 规则通过文件加载
+			Consumers:         4,
+			QueueSize:         4096,
+			OperationRiskFile: "", // 旧的硬编码方式，留空表示使用 R2Config
 		},
 		Dispatch: DispatchConfig{
+			Enabled:                true,
 			MinWorkers:             2,
 			MaxWorkers:             64,
 			ScaleUpThreshold:       100,
@@ -145,14 +144,22 @@ func DefaultServerConfig() *ServerConfig {
 			DBPath: "data/fingerprint.db",
 		},
 		Portrait: PortraitConfig{
+			Enable:       true,
 			DBPath:       "data/portrait.db",
 			HistoryLimit: 10,
 		},
 		Output: OutputConfig{
 			MaxSize: 10000,
 		},
+		Alert: AlertConfig{
+			// 空结构，无需设置
+		},
 		TLS: TLSConfig{
-			Enabled: false,
+			Enabled:           false,
+			CertFile:          "",
+			KeyFile:           "",
+			CAFile:            "",
+			RequireClientAuth: false,
 		},
 	}
 }
