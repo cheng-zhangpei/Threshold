@@ -89,10 +89,11 @@ func (p *LocalProxy) Stop() {
 	log.Printf("[CLIENT] stopped")
 }
 
+// EstablishConnection
 func (p *LocalProxy) EstablishConnection(ctx context.Context, req *pb.ConnectionInit) (*pb.ConnectionAck, error) {
 	log.Printf("[CLIENT] EstablishConnection user=%s device=%s", req.UserId, req.DeviceUuid)
-	if req.Protocol != "tcp" {
-		// TODO(cheng) 目前只是支持这两种协议,所以具体的类型只可能是两者之一
+	// 设置默认协议：如果未指定，视为 HTTP（IDV Client 场景）
+	if req.Protocol == "" {
 		req.Protocol = "http"
 	}
 	resp, err := p.serverClient.EstablishConnection(ctx, req)
@@ -106,7 +107,7 @@ func (p *LocalProxy) EstablishConnection(ctx context.Context, req *pb.Connection
 			deviceUUID: req.DeviceUuid,
 			userID:     req.UserId,
 			osType:     req.OsType,
-			ip:         req.Ip, // ← 保存客户端声明的 IP
+			ip:         req.Ip,
 			collector:  collector.NewCollector(),
 		}
 		p.mu.Unlock()
@@ -114,6 +115,7 @@ func (p *LocalProxy) EstablishConnection(ctx context.Context, req *pb.Connection
 	return resp, nil
 }
 
+// ProxyStream
 func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 	for {
 		req, err := stream.Recv()
@@ -121,6 +123,7 @@ func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) erro
 			return err
 		}
 
+		// 获取连接状态
 		p.mu.RLock()
 		cs := p.connections[req.ConnectionId]
 		p.mu.RUnlock()
@@ -128,35 +131,23 @@ func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) erro
 			cs.collector.Record("proxy", req.ConnectionId)
 		}
 
-		// ──── 注入 X-Proxy-* 指纹头 ────
+		// ---- 注入指纹（HTTP 才注入 Header） ----
 		deviceUUID := p.deviceUUID
 		osType := p.osType
-		clientIP := "" // fallback
+		clientIP := ""
 		if cs != nil {
 			deviceUUID = cs.deviceUUID
 			osType = cs.osType
-			clientIP = cs.ip // ← 用 ConnectionInit 时保存的 IP
+			clientIP = cs.ip
 		}
 		processedData, _ := detectAndInject(req.RawHttpRequest, deviceUUID, osType, clientIP)
 		req.RawHttpRequest = processedData
-		// ─────────────────────
+		// ------------------------------------
 
+		// 创建到服务端的 gRPC 流（每个请求独立流）
 		serverStream, err := p.serverClient.ProxyStream(context.Background())
-		//injected, err := injectProxyHeaders(req.RawHttpRequest, deviceUUID, osType, clientIP)
 		if err != nil {
-			log.Printf("[CLIENT] injectFingerprint error: %v", err)
-			stream.Send(&pb.ProxyResponse{
-				ConnectionId: req.ConnectionId,
-				Status:       pb.Status_BLOCKED,
-				Reason:       fmt.Sprintf("header injection failed: %v", err),
-			})
-			continue
-		}
-		//req.RawHttpRequest = injected
-		// ──────────────────────────────────
-
-		serverStream, err = p.serverClient.ProxyStream(context.Background())
-		if err != nil {
+			log.Printf("[CLIENT] create server stream error: %v", err)
 			stream.Send(&pb.ProxyResponse{
 				ConnectionId: req.ConnectionId,
 				Status:       pb.Status_RATE_LIMITED,
@@ -164,13 +155,31 @@ func (p *LocalProxy) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) erro
 			})
 			continue
 		}
-		serverStream.Send(req)
-		serverStream.CloseSend()
-		resp, err := serverStream.Recv()
-		if err != nil {
-			log.Printf("[CLIENT] recv error: %v", err)
+
+		// 发送请求
+		if err := serverStream.Send(req); err != nil {
+			log.Printf("[CLIENT] send to server error: %v", err)
+			stream.Send(&pb.ProxyResponse{
+				ConnectionId: req.ConnectionId,
+				Status:       pb.Status_RATE_LIMITED,
+				Reason:       fmt.Sprintf("send error: %v", err),
+			})
 			continue
 		}
+		serverStream.CloseSend()
+
+		// 等待服务端响应
+		resp, err := serverStream.Recv()
+		if err != nil {
+			log.Printf("[CLIENT] recv from server error: %v", err)
+			stream.Send(&pb.ProxyResponse{
+				ConnectionId: req.ConnectionId,
+				Status:       pb.Status_RATE_LIMITED,
+				Reason:       fmt.Sprintf("recv error: %v", err),
+			})
+			continue
+		}
+		// 将响应转发给 IDV Client
 		stream.Send(resp)
 	}
 }

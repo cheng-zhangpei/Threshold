@@ -194,6 +194,7 @@ func (dm *DispatchManager) monitorLoop() {
 		select {
 		case <-ticker.C:
 			dm.checkScale()
+			// TODO(CHENG) 这里最好加一个检查，如果每次收到信号都触发一次有点浪费
 			dm.reloadFromStorage()
 		case <-dm.done:
 			return

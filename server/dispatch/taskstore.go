@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +23,7 @@ type storedTask struct {
 	OpKey        string `json:"op_key"`
 	RiskLevel    int    `json:"risk_level"`
 	OverflowKey  string `json:"overflow_key"`
+	TargetAddr   string `json:"target_addr"`
 }
 
 // OverflowTask 待溢出的任务输入
@@ -107,7 +107,7 @@ func (ts *TaskStore) Reload(batch int) (*ReloadResult, error) {
 	var result ReloadResult
 
 	err := ts.store.View(func(tx storage.Tx) error {
-		log.Printf("dispatch: reloading from storage")
+		//log.Printf("dispatch: reloading from storage")
 		keys, values, err := tx.PrefixScan(storage.BucketDispatchTasks, nil)
 		if err != nil {
 			return err
@@ -133,6 +133,7 @@ func (ts *TaskStore) Reload(batch int) (*ReloadResult, error) {
 				Method:       st.Method,
 				Path:         st.Path,
 				OpKey:        st.OpKey,
+				TargetAddr:   st.TargetAddr,
 			}
 
 			result.Tasks = append(result.Tasks, ReloadedTask{

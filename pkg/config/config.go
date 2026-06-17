@@ -20,7 +20,12 @@ type ServerConfig struct {
 	Alert       AlertConfig       `yaml:"alert"`
 	TLS         TLSConfig         `yaml:"tls"`
 }
-
+type OutputConfig struct {
+	MaxSize         int  `yaml:"max_size"`          // Pull 队列最大容量
+	SenderEnable    bool `yaml:"sender_enable"`     // 是否启用 Sender 转发（默认 true）
+	SenderWorkers   int  `yaml:"sender_workers"`    // Sender Worker 并发数（默认 4）
+	SenderQueueSize int  `yaml:"sender_queue_size"` // 每个 Worker 队列容量（默认 1024）
+}
 type GRPCConfig struct {
 	ListenAddr string `yaml:"listen_addr"`
 	RateLimit  int    `yaml:"rate_limit"`
@@ -48,10 +53,6 @@ type PortraitConfig struct {
 	Enable       bool   `yaml:"enable"`
 	DBPath       string `yaml:"db_path"`
 	HistoryLimit int    `yaml:"history_limit"`
-}
-
-type OutputConfig struct {
-	MaxSize int `yaml:"max_size"`
 }
 
 type AlertConfig struct {
@@ -149,7 +150,10 @@ func DefaultServerConfig() *ServerConfig {
 			HistoryLimit: 10,
 		},
 		Output: OutputConfig{
-			MaxSize: 10000,
+			MaxSize:         10000,
+			SenderEnable:    true,
+			SenderWorkers:   4,
+			SenderQueueSize: 1024,
 		},
 		Alert: AlertConfig{
 			// 空结构，无需设置

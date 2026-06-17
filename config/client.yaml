@@ -1,20 +1,19 @@
-# Threshold 安全代理 - 客户端配置
+# configs/client.yaml
 
-redirect:
-  local_port: 8080
-  target_host: ""
-  target_port: 0
+# 全局用户ID（如果各模块没有单独指定，则使用此值）
+user_id: "default-user"
 
-collector: {}
-
+# ========== 模式一：原生 gRPC 代理（为 IDV Client 服务） ==========
 proxy:
-  listen_addr: ":9090"
-  server_addr: "localhost:50051"
-  device_uuid: ""
+  listen_addr: "127.0.0.1:9091"
+  server_addr: "127.0.0.1:50051"
+  device_uuid: ""          # 留空则自动采集
+  os_type: ""              # 留空则自动检测
+  # user_id 可单独指定，若为空则使用全局 user_id
 
-tls:
-  enabled: false
-  cert_file: ""
-  key_file: ""
-  ca_file: ""
-  require_client_auth: false
+# ========== 模式二：SOCKS5 转 gRPC 代理（为通用应用服务） ==========
+socks5:
+  enabled: true            # 是否启用 SOCKS5 模式
+  listen_addr: "127.0.0.1:1080"
+  # user_id 可单独指定，若为空则使用全局 user_id
+  # device_uuid 和 os_type 复用全局采集结果，无需重复配置

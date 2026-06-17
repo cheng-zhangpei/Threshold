@@ -142,6 +142,7 @@ message ConnectionInit {
     // timestamp 连接发起时间戳（Unix 毫秒）
     int64 timestamp = 5;
     string protocol = 6;   // "http", "https", "tcp", "mysql", ...
+    string target_addr = 7;
 }
 
 // ============================================================

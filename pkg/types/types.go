@@ -83,6 +83,7 @@ type ConnectionContext struct {
 	Events         []EventRecord
 	TriggeredFlags []string
 	Protocol       string
+	TargetAddr     string
 }
 
 func (c *ConnectionContext) RecordEvent(opType string) {
@@ -150,6 +151,8 @@ type ParsedRequest struct {
 	Body         []byte
 	Fingerprint  DeviceFingerprint
 	OpKey        string
+	TargetAddr   string `json:"target_addr,omitempty"` // 目标服务器地址，如 "example.com:80"
+	// todo 最好TCP要拓展更多的语义，可以作为可选字段，由于增强决策引擎的功能，需要和决策引擎一起设计我认为会比较合理
 }
 
 func ParseProxyRequest(connectionID, deviceUUID, userID string, timestamp int64, rawHTTPRequest []byte) (*ParsedRequest, error) {
@@ -160,14 +163,13 @@ func ParseProxyRequest(connectionID, deviceUUID, userID string, timestamp int64,
 	if len(rawHTTPRequest) == 0 {
 		return nil, fmt.Errorf("empty raw_http_request")
 	}
-	//if err := req.parseHTTPRequest(rawHTTPRequest); err != nil {
-	//	return nil, err
-	//}
+	if err := req.parseHTTPRequest(rawHTTPRequest); err != nil {
+		return nil, err
+	}
 	//req.extractFingerprint()
 	req.OpKey = req.Method + " " + req.Path
 	return req, nil
 }
-
 func (r *ParsedRequest) parseHTTPRequest(raw []byte) error {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	if !scanner.Scan() {
@@ -196,9 +198,16 @@ func (r *ParsedRequest) parseHTTPRequest(raw []byte) error {
 		body.WriteByte(10)
 	}
 	r.Body = bytes.TrimRight(body.Bytes(), "\n")
+
+	// 提取 Host 头作为目标地址
+	if host, ok := r.Headers["Host"]; ok && host != "" {
+		r.TargetAddr = host
+		// 注意：如果 Host 不带端口，可根据请求的 Scheme 补充默认端口
+		// 例如：如果 r.Method 不是 CONNECT，且没有端口，对于 http 默认 80，https 默认 443
+		// 目前仅作提取，不加默认端口，保证后续可用
+	}
 	return scanner.Err()
 }
-
 func (r *ParsedRequest) extractFingerprint() {
 	set := func(val string) *string {
 		if val == "" {

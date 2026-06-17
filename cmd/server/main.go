@@ -1,14 +1,17 @@
 package main
 
 import (
+	"Threshold/pkg/waiter"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"Threshold/pkg/config"
 	"Threshold/pkg/storage"
@@ -23,10 +26,9 @@ import (
 )
 
 func main() {
-	cfgPath := "configs/server.yaml"
-	if len(os.Args) > 1 {
-		cfgPath = os.Args[1]
-	}
+	var cfgPath string
+	flag.StringVar(&cfgPath, "config", "./config/clients.yaml", "path to client config file")
+	flag.Parse()
 
 	cfg, err := config.LoadServerConfig(cfgPath)
 	if err != nil {
@@ -59,8 +61,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fingerprint tree: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("fingerprint tree loaded\n%s", fpTree.Print())
+	waiterInstance := waiter.NewWaiter(30 * time.Second)
 
+	fmt.Printf("fingerprint tree loaded\n%s", fpTree.Print())
+	outputBuf := output.NewOutputBufferWithConfig(
+		cfg.Output.MaxSize,
+		cfg.Output.SenderWorkers,
+		cfg.Output.SenderQueueSize,
+		cfg.Output.SenderEnable,
+		waiterInstance,
+	)
+	// 在服务关闭时调用 outputBuf.Stop()
+	defer outputBuf.Stop()
 	// --- 用户画像 + 决策引擎 ---
 	var ps *portrait.Store
 	if cfg.Portrait.Enable {
@@ -71,7 +83,6 @@ func main() {
 		engine = decision.NewEngine(ps)
 	}
 	// --- 输出缓冲 + 告警队列 ---
-	outputBuf := output.NewOutputBuffer()
 	alertQueue := alert.NewAlertQueue()
 
 	// --- DispatchManager: 异步调度 + 弹性 WorkerPool ---
@@ -95,7 +106,6 @@ func main() {
 		})
 		defer dm.Shutdown()
 	}
-
 	// --- Router: 事件消费型路由 ---
 	riskTable := router_v1.NewOperationRiskTable()
 	var r *router_v1.Router
@@ -121,7 +131,7 @@ func main() {
 	}
 
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)

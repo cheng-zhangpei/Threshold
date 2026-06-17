@@ -3,20 +3,19 @@ package main
 
 import (
 	"Threshold/client/configs"
+	"Threshold/client/proxy"
+	"Threshold/client/socks5" // 新增 SOCKS5 包
 	client "Threshold/client/utils"
+	pb "Threshold/pkg/proto/pb"
 	"flag"
 	"fmt"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"Threshold/client/proxy"
-	"Threshold/client/socks5" // 新增 SOCKS5 包
-	pb "Threshold/pkg/proto/pb"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -57,7 +56,35 @@ func main() {
 
 	// 5. 创建共享的 gRPC Client（供 SOCKS5 使用；proxy 模块内部自己创建，保持其独立性）
 	//    注意：如果两种模式都启用，proxy 会额外创建一个连接，暂时可接受
+	// TODO(CHENG) 注册设备（测试用，后续改为管理员权限）
+	//=======================================================================================================================
 	var grpcClient pb.SecurityProxyClient
+	//var grpcConn *grpc.ClientConn
+	//if cfg.Proxy.ListenAddr != "" || cfg.Socks5.Enabled {
+	//	var err error
+	//	grpcConn, err = grpc.NewClient(cfg.Proxy.ServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	//	if err != nil {
+	//		log.Fatalf("dial server: %v", err)
+	//	}
+	//	defer grpcConn.Close()
+	//	grpcClient = pb.NewSecurityProxyClient(grpcConn)
+	//
+	//	registerCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//	defer cancel()
+	//	registerResp, err := grpcClient.RegisterDevice(registerCtx, &pb.RegisterDeviceRequest{
+	//		DeviceUuid: deviceUUID,
+	//		OsType:     osType,
+	//		Ip:         localIP,
+	//	})
+	//	if err != nil {
+	//		log.Printf("[WARN] device registration error: %v", err)
+	//	} else if registerResp.Success {
+	//		log.Printf("[INFO] Device registered successfully: %s", deviceUUID)
+	//	} else {
+	//		log.Printf("[WARN] Device registration failed: %s", registerResp.Reason)
+	//	}
+	//}
+	//========================================================================================================================
 	if cfg.Socks5.Enabled {
 		grpcConn, err := grpc.NewClient(cfg.Proxy.ServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
