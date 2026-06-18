@@ -645,6 +645,8 @@ func (x *RegisterDeviceResponse) GetReason() string {
 type UnregisterDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
+	OsType        string                 `protobuf:"bytes,2,opt,name=os_type,json=osType,proto3" json:"os_type,omitempty"`
+	Ip            string                 `protobuf:"bytes,3,opt,name=ip,proto3" json:"ip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -682,6 +684,20 @@ func (*UnregisterDeviceRequest) Descriptor() ([]byte, []int) {
 func (x *UnregisterDeviceRequest) GetDeviceUuid() string {
 	if x != nil {
 		return x.DeviceUuid
+	}
+	return ""
+}
+
+func (x *UnregisterDeviceRequest) GetOsType() string {
+	if x != nil {
+		return x.OsType
+	}
+	return ""
+}
+
+func (x *UnregisterDeviceRequest) GetIp() string {
+	if x != nil {
+		return x.Ip
 	}
 	return ""
 }
@@ -933,10 +949,12 @@ const file_pkg_proto_proxy_proto_rawDesc = "" +
 	"\x02ip\x18\x03 \x01(\tR\x02ip\"J\n" +
 	"\x16RegisterDeviceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\":\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"c\n" +
 	"\x17UnregisterDeviceRequest\x12\x1f\n" +
 	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
-	"deviceUuid\"L\n" +
+	"deviceUuid\x12\x17\n" +
+	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\"L\n" +
 	"\x18UnregisterDeviceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"*\n" +

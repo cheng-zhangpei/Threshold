@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Threshold/pkg/waiter"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
 	"context"
@@ -66,11 +67,14 @@ func setupEnv(t *testing.T) *testEnv {
 	fpTree.Register("init", types.DeviceFingerprint{
 		UUID: &testUUID, OS: &testOS, IP: &testIP,
 	})
+	waiterInstance := waiter.NewWaiter(30 * time.Second)
 
 	ps := portrait.NewStore(store)
 	engine := decision.NewEngine(ps)
-	outputBuf := output.NewOutputBuffer()
+	outputBuf := output.NewOutputBufferWithConfig(10000, 4, 1024, true, waiterInstance)
 	alertQueue := alert.NewAlertQueue()
+
+	// 创建 Waiter
 
 	dm := dispatch.NewDispatchManager(dispatch.DispatcherConfig{
 		Policy: dispatch.PoolPolicy{
@@ -80,12 +84,11 @@ func setupEnv(t *testing.T) *testEnv {
 		DecisionFn: func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, rl types.RiskLevel) *types.Decision {
 			return engine.Evaluate(ctx, history, rl)
 		},
-	})
+	}, outputBuf, alertQueue)
 
 	riskTable := router_v1.NewOperationRiskTable()
 	r := router_v1.NewRouter(riskTable, outputBuf, dm, 2, 256)
 
-	// r2 可选，测试中暂时不用，传 nil
 	var r2 *router_v2.Router = nil
 
 	srvLis, err := net.Listen("tcp", ":0")
@@ -93,7 +96,9 @@ func setupEnv(t *testing.T) *testEnv {
 		t.Fatalf("listen: %v", err)
 	}
 	grpcSrv := grpc.NewServer()
-	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps)
+	// 修改 NewHandler 调用：传入 dm 和 waiter，移除 engine
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
+
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 	go grpcSrv.Serve(srvLis)
 	srvAddr := srvLis.Addr().String()
@@ -119,7 +124,6 @@ func setupEnv(t *testing.T) *testEnv {
 
 	return &testEnv{grpcSrv: grpcSrv, srvAddr: srvAddr, clientProxy: cp, cleanup: cleanup}
 }
-
 func idvClient(t *testing.T, addr string) pb.SecurityProxyClient {
 	t.Helper()
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))

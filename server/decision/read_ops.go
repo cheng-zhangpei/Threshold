@@ -2,6 +2,7 @@ package decision
 
 // READ_OPS 只读操作集合
 // Router 判定 L0（直接穿透）的操作类型
+// TODO(cheng) 这里的定位有点尴尬，到后面有需求做一下透传看看
 var READ_OPS = map[string]bool{
 	"GET /api/cloud/public/images":           true,
 	"GET /api/cloud/public/images/download":  true,

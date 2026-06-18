@@ -5,6 +5,7 @@ import (
 	"Threshold/pkg/waiter"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -110,11 +111,18 @@ func (b *OutputBuffer) worker(id int) {
 		}
 	}
 }
-
 func (b *OutputBuffer) process(msg Message) {
 	target := msg.Request.TargetAddr
 	if target == "" {
 		log.Printf("[OutputBuffer] no target address for %s, skip", msg.Request.OpKey)
+		// 返回错误响应，避免 ProxyStream 超时
+		if b.waiter != nil && msg.RequestID != "" {
+			b.waiter.Complete(msg.RequestID, &waiter.ResponseData{
+				Status: pb.Status_BLOCKED,
+				Reason: "no target address",
+				Error:  fmt.Errorf("no target address"),
+			})
+		}
 		return
 	}
 
@@ -130,7 +138,6 @@ func (b *OutputBuffer) process(msg Message) {
 		b.waiter.Complete(msg.RequestID, respData)
 	}
 }
-
 func (b *OutputBuffer) sendHTTP(msg Message, target string) *waiter.ResponseData {
 	url := "http://" + target + msg.Request.Path
 	req, err := http.NewRequest(msg.Request.Method, url, bytes.NewReader(msg.Request.Body))

@@ -25,7 +25,7 @@ func main() {
 		ip         string
 	)
 	flag.StringVar(&configPath, "config", "./config/client.yaml", "path to client config file")
-	flag.StringVar(&action, "action", "register", "action: register or unregister")
+	flag.StringVar(&action, "action", "device-tool", "action: device-tool or unregister")
 	flag.StringVar(&deviceUUID, "uuid", "", "device UUID (if empty, use config value)")
 	flag.StringVar(&osType, "os", "", "OS type (if empty, use config value)")
 	flag.StringVar(&ip, "ip", "", "IP address (if empty, use config value)")
@@ -65,14 +65,14 @@ func main() {
 	defer cancel()
 
 	switch action {
-	case "register":
+	case "device-tool":
 		resp, err := client.RegisterDevice(ctx, &pb.RegisterDeviceRequest{
 			DeviceUuid: deviceUUID,
 			OsType:     osType,
 			Ip:         ip,
 		})
 		if err != nil {
-			log.Fatalf("register error: %v", err)
+			log.Fatalf("device-tool error: %v", err)
 		}
 		if resp.Success {
 			fmt.Printf("✅ Device registered: %s\n", deviceUUID)
@@ -82,6 +82,8 @@ func main() {
 	case "unregister":
 		resp, err := client.UnregisterDevice(ctx, &pb.UnregisterDeviceRequest{
 			DeviceUuid: deviceUUID,
+			OsType:     osType,
+			Ip:         ip,
 		})
 		if err != nil {
 			log.Fatalf("unregister error: %v", err)
@@ -92,7 +94,7 @@ func main() {
 			fmt.Printf("❌ Unregister failed: %s\n", resp.Reason)
 		}
 	default:
-		log.Fatalf("unknown action: %s (use register or unregister)", action)
+		log.Fatalf("unknown action: %s (use device-tool or unregister)", action)
 	}
 }
 

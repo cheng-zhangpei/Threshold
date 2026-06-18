@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Threshold/pkg/waiter"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
 	"context"
@@ -64,7 +65,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	testIP := "10.0.0.1"
 	fp := types.DeviceFingerprint{UUID: &testUUID, OS: &testOS, IP: &testIP}
 	if err := fpTree.Register("init-conn", fp); err != nil {
-		t.Fatalf("register fingerprint: %v", err)
+		t.Fatalf("device-tool fingerprint: %v", err)
 	}
 
 	ps := portrait.NewStore(store)
@@ -83,13 +84,14 @@ func setupTestEnv(t *testing.T) *testEnv {
 		DecisionFn: func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision {
 			return engine.Evaluate(ctx, history, riskLevel)
 		},
-	})
+	}, outputBuf, alertQueue)
+	waiterInstance := waiter.NewWaiter(30 * time.Second)
 
 	riskTable := router_v1.NewOperationRiskTable()
 	r := router_v1.NewRouter(riskTable, outputBuf, dm, 2, 256)
 	var r2 *router_v2.Router = nil
 	grpcSrv := grpc.NewServer()
-	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps)
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 
 	lis, err := net.Listen("tcp", ":0")

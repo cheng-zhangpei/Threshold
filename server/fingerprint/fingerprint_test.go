@@ -65,12 +65,12 @@ func TestMatch_SimpleRegister(t *testing.T) {
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
-		t.Fatalf("register: %v", err)
+		t.Fatalf("device-tool: %v", err)
 	}
 
 	// 完全匹配
 	if !tree.Match(fp) {
-		t.Error("should match after register")
+		t.Error("should match after device-tool")
 	}
 
 	// 不同 OS 不匹配
@@ -110,7 +110,7 @@ func TestMatch_NullDimensionSkip(t *testing.T) {
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
-		t.Fatalf("register: %v", err)
+		t.Fatalf("device-tool: %v", err)
 	}
 
 	// 匹配时也省略 OS 和 Protocol → 应该命中 null 分支
@@ -141,7 +141,7 @@ func TestMatch_PartialRegistration(t *testing.T) {
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
-		t.Fatalf("register: %v", err)
+		t.Fatalf("device-tool: %v", err)
 	}
 
 	// 只传 OS + IP，应该匹配（叶节点在 IP 层）
@@ -171,7 +171,7 @@ func TestMatch_LeafAtFirstLevel(t *testing.T) {
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
-		t.Fatalf("register: %v", err)
+		t.Fatalf("device-tool: %v", err)
 	}
 
 	// 任意传 OS=linux 就应该匹配
@@ -203,7 +203,7 @@ func TestUnregister(t *testing.T) {
 	}
 	err := tree.Register("conn-001", fp)
 	if err != nil {
-		t.Fatalf("register: %v", err)
+		t.Fatalf("device-tool: %v", err)
 	}
 
 	if !tree.Match(fp) {

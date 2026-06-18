@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"Threshold/pkg/types"
 	"Threshold/server/output"
@@ -11,7 +12,7 @@ import (
 
 // Dispatcher 调度接口（与 V1 保持一致）
 type Dispatcher interface {
-	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel) *types.Decision
+	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel, reqID string) *types.Decision
 }
 
 // routeRequest 提交给 Router 消费者处理的请求单元
@@ -145,7 +146,9 @@ func (r *Router) process(parsed *types.ParsedRequest) *types.Decision {
 		})
 		return decision
 	}
-	return r.dispatch.Enqueue(parsed, riskLevel)
+	// 生成 reqID
+	reqID := fmt.Sprintf("router-%s-%d", parsed.ConnectionID, time.Now().UnixNano())
+	return r.dispatch.Enqueue(parsed, riskLevel, reqID)
 }
 
 // RouteL0 L0 直接穿透（兼容 V1 接口）

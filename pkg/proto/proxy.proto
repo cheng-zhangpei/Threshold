@@ -198,6 +198,8 @@ message RegisterDeviceResponse {
 
 message UnregisterDeviceRequest {
 	string device_uuid = 1;
+  string os_type = 2;
+  string ip = 3;
 }
 
 message UnregisterDeviceResponse {

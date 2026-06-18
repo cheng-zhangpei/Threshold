@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"Threshold/pkg/waiter"
+	"Threshold/server/dispatch"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
 	"crypto/tls"
@@ -38,6 +39,7 @@ func New(
 	alertQueue *alert.AlertQueue,
 	portraitStore *portrait.Store,
 	waiter *waiter.Waiter,
+	dm *dispatch.DispatchManager,
 ) (*Server, error) {
 	var opts []grpc.ServerOption
 
@@ -57,7 +59,7 @@ func New(
 	}
 
 	grpcServer := grpc.NewServer(opts...)
-	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter)
+	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter, dm)
 	pb.RegisterSecurityProxyServer(grpcServer, handler)
 
 	listener, err := net.Listen("tcp", cfg.GRPC.ListenAddr)

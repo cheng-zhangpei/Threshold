@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"Threshold/pkg/types"
 	"Threshold/server/output"
@@ -12,7 +13,7 @@ import (
 // Dispatcher 调度接口
 // Router 将 L1+ 的请求委托给 Dispatcher 入队处理
 type Dispatcher interface {
-	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel) *types.Decision
+	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel, reqID string) *types.Decision
 }
 
 // routeRequest 提交给 Router 消费者处理的请求单元
@@ -102,8 +103,6 @@ func (r *Router) run() {
 		}
 	}
 }
-
-// process 核心处理逻辑：Classify + 分发
 func (r *Router) process(parsed *types.ParsedRequest) *types.Decision {
 	riskLevel := r.Classify(parsed)
 
@@ -119,6 +118,7 @@ func (r *Router) process(parsed *types.ParsedRequest) *types.Decision {
 		})
 		return decision
 	}
+
 	if r.dispatch == nil {
 		// 降级模式：dispatch 不可用时，直接放行到 OutputBuffer
 		log.Printf("[Router] dispatch unavailable, fallback to direct pass for %s", parsed.OpKey)
@@ -133,7 +133,10 @@ func (r *Router) process(parsed *types.ParsedRequest) *types.Decision {
 		})
 		return decision
 	}
-	return r.dispatch.Enqueue(parsed, riskLevel)
+
+	// 生成 reqID（Router 层面使用时间戳 + 随机数）
+	reqID := fmt.Sprintf("router-%s-%d", parsed.ConnectionID, time.Now().UnixNano())
+	return r.dispatch.Enqueue(parsed, riskLevel, reqID)
 }
 
 // RouteL0 L0 操作直接穿透到 OutputBuffer

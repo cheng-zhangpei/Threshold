@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"Threshold/pkg/storage"
 	"Threshold/pkg/types"
@@ -102,14 +103,60 @@ func (t *Tree) Register(connID string, fp types.DeviceFingerprint) error {
 	return t.wal.Commit(connID, seq, storage.WLOpPut, storage.BucketFingerprints, key, data)
 }
 
+// Unregister 从内存树和存储中删除设备指纹
 func (t *Tree) Unregister(connID string, fp types.DeviceFingerprint) error {
-	t.removeFromMemory(fp)
-	key := string(recordKey(fp))
-	seq, err := t.wal.Begin(connID, storage.WLOpDelete, storage.BucketFingerprints, key, nil)
+	// 1. 从内存树中删除叶子节点
+	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
+	if !t.deleteLeaf(t.root, dims, 0) {
+		// 如果没找到叶子节点，返回错误（但注销可能已经注册过，所以不应报错）
+		// 直接返回 nil 以避免影响其他逻辑
+		// 但为了调试，可以打日志
+		log.Printf("[WARN] fingerprint leaf not found in memory for %v", fp)
+	}
+
+	// 2. 从存储中删除
+	key := recordKey(fp)
+	if err := t.store.Update(func(tx storage.Tx) error {
+		return tx.Delete(storage.BucketFingerprints, key)
+	}); err != nil {
+		return fmt.Errorf("store delete: %w", err)
+	}
+
+	// 3. 写 WAL 日志（用于崩溃恢复）
+	seq, err := t.wal.Begin(connID, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
 	if err != nil {
 		return fmt.Errorf("wal begin: %w", err)
 	}
-	return t.wal.Commit(connID, seq, storage.WLOpDelete, storage.BucketFingerprints, key, nil)
+	return t.wal.Commit(connID, seq, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
+}
+
+// deleteLeaf 递归删除路径上的叶子节点，返回是否删除成功
+func (t *Tree) deleteLeaf(node *Node, dims []*string, level int) bool {
+	if level >= len(dims) {
+		return false
+	}
+	key := NullKey
+	if dims[level] != nil {
+		key = *dims[level]
+	}
+	child := node.getChild(key)
+	if child == nil {
+		return false
+	}
+	// 如果 child 是叶子节点，删除它
+	if child.isLeaf {
+		delete(node.children, key)
+		return true
+	}
+	// 否则继续深入
+	if t.deleteLeaf(child, dims, level+1) {
+		// 如果子节点已空且不是叶子，则删除该子节点
+		if !child.hasChildren() && !child.isLeaf {
+			delete(node.children, key)
+		}
+		return true
+	}
+	return false
 }
 
 // registerInMemory
@@ -144,52 +191,39 @@ func (t *Tree) registerInMemory(fp types.DeviceFingerprint) {
 	}
 }
 
-// removeFromMemory
-// 沿路径找到叶节点，标记非叶，自底向上清理空节点。
+// removeFromMemory 从内存树中删除指定指纹的叶子节点（递归版本）
 func (t *Tree) removeFromMemory(fp types.DeviceFingerprint) {
 	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
-	path := make([]*Node, 0, LayerCount+1)
-	path = append(path, t.root)
-	current := t.root
-	for _, val := range dims {
-		var key string
-		if val == nil {
-			key = NullKey
-		} else {
-			key = *val
-		}
-		next := current.getChild(key)
-		if next == nil {
-			return
-		}
-		path = append(path, next)
-		if next.isLeaf {
-			next.isLeaf = false
-			t.cleanupPath(path, dims)
-			return
-		}
-		current = next
-	}
-	current.isLeaf = false
-	t.cleanupPath(path, dims)
+	t.deletePath(t.root, dims, 0)
 }
 
-func (t *Tree) cleanupPath(path []*Node, dims []*string) {
-	for i := len(path) - 1; i > 0; i-- {
-		node := path[i]
-		if !node.isLeaf && !node.hasChildren() {
-			parent := path[i-1]
-			var key string
-			if dims[i-1] == nil {
-				key = NullKey
-			} else {
-				key = *dims[i-1]
-			}
-			delete(parent.children, key)
-		} else {
-			break
-		}
+// deletePath 递归查找并删除路径上的叶子节点，返回是否删除成功
+func (t *Tree) deletePath(node *Node, dims []*string, level int) bool {
+	if level >= len(dims) {
+		return false
 	}
+	key := NullKey
+	if dims[level] != nil {
+		key = *dims[level]
+	}
+	child := node.getChild(key)
+	if child == nil {
+		return false
+	}
+	// 如果 child 是叶子节点，删除它
+	if child.isLeaf {
+		delete(node.children, key)
+		return true
+	}
+	// 否则继续深入
+	if t.deletePath(child, dims, level+1) {
+		// 如果子节点被删除后变为空且不是叶子，则删除该子节点（可选，但有助于清理）
+		if !child.hasChildren() && !child.isLeaf {
+			delete(node.children, key)
+		}
+		return true
+	}
+	return false
 }
 
 // ============================================================

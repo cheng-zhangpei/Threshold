@@ -103,7 +103,7 @@ func main() {
 			DecisionFn: func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision {
 				return engine.Evaluate(ctx, history, riskLevel)
 			},
-		})
+		}, outputBuf, alertQueue)
 		defer dm.Shutdown()
 	}
 	// --- Router: 事件消费型路由 ---
@@ -131,7 +131,7 @@ func main() {
 	}
 
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)

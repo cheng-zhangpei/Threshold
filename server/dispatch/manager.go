@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"Threshold/server/alert"
+	"Threshold/server/output"
 	"fmt"
 	"log"
 	"sync"
@@ -16,14 +18,15 @@ import (
 // ============================================================
 
 type DispatchTask struct {
-	Parsed   *types.ParsedRequest
-	Risk     types.RiskLevel
-	ResultCh chan *types.Decision
+	Parsed    *types.ParsedRequest
+	Risk      types.RiskLevel
+	ResultCh  chan *types.Decision
+	RequestID string
 }
 
 // Dispatcher 接口（Router 依赖此接口入队）
 type Dispatcher interface {
-	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel) *types.Decision
+	Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel, reqID string) *types.Decision
 }
 
 // zeroFillPolicy 对零值字段填充默认值
@@ -74,6 +77,7 @@ func zeroFillPolicy(p PoolPolicy) PoolPolicy {
 
 type pendingEntry struct {
 	resultCh chan *types.Decision
+	reqID    string
 }
 
 // DispatchManager 调度中枢
@@ -97,7 +101,8 @@ type DispatchManager struct {
 	overflowed atomic.Int64
 	processed  atomic.Int64
 	reloaded   atomic.Int64
-
+	OutputBuf  *output.OutputBuffer // 新增
+	AlertQueue *alert.AlertQueue    // 新增
 	decisionFn func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision
 }
 
@@ -107,7 +112,7 @@ type DispatcherConfig struct {
 	DecisionFn func(ctx *types.ConnectionContext, history []*types.ConnectionSummary, riskLevel types.RiskLevel) *types.Decision
 }
 
-func NewDispatchManager(cfg DispatcherConfig) *DispatchManager {
+func NewDispatchManager(cfg DispatcherConfig, output *output.OutputBuffer, alter *alert.AlertQueue) *DispatchManager {
 	if cfg.DecisionFn == nil {
 		cfg.DecisionFn = func(_ *types.ConnectionContext, _ []*types.ConnectionSummary, _ types.RiskLevel) *types.Decision {
 			return &types.Decision{Action: types.ALLOW, Reason: "default pass"}
@@ -123,6 +128,8 @@ func NewDispatchManager(cfg DispatcherConfig) *DispatchManager {
 		done:       make(chan struct{}),
 		pending:    make(map[string]*pendingEntry),
 		decisionFn: cfg.DecisionFn,
+		OutputBuf:  output,
+		AlertQueue: alter,
 	}
 
 	for i := 0; i < cfg.Policy.MinWorkers; i++ {
@@ -142,20 +149,33 @@ func (dm *DispatchManager) nextOverflowKey() string {
 // ============================================================
 // Enqueue
 // ============================================================
-
-func (dm *DispatchManager) Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel) *types.Decision {
+func (dm *DispatchManager) Enqueue(parsed *types.ParsedRequest, riskLevel types.RiskLevel, reqID string) *types.Decision {
 	resultCh := make(chan *types.Decision, 1)
-	task := DispatchTask{Parsed: parsed, Risk: riskLevel, ResultCh: resultCh}
+	task := DispatchTask{
+		Parsed:    parsed,
+		Risk:      riskLevel,
+		ResultCh:  resultCh,
+		RequestID: reqID, // 传递 RequestID
+	}
 
 	select {
 	case dm.queue <- task:
+		// 入队成功，等待 Worker 处理
 	default:
+		// 队列满，溢出到存储
 		key := dm.nextOverflowKey()
 		dm.pendingMu.Lock()
-		dm.pending[key] = &pendingEntry{resultCh: resultCh}
+		dm.pending[key] = &pendingEntry{
+			resultCh: resultCh,
+			reqID:    reqID, // 保存 reqID
+		}
 		dm.pendingMu.Unlock()
 
-		_, err := dm.ts.Overflow(OverflowTask{Parsed: parsed, Risk: riskLevel, OverflowKey: key})
+		_, err := dm.ts.Overflow(OverflowTask{
+			Parsed:      parsed,
+			Risk:        riskLevel,
+			OverflowKey: key,
+		})
 		if err != nil {
 			dm.pendingMu.Lock()
 			delete(dm.pending, key)

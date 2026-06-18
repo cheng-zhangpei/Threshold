@@ -53,6 +53,7 @@ func (g *Gateway) Start() error {
 
 func (g *Gateway) handleConn(conn net.Conn) {
 	defer conn.Close()
+	log.Printf("[SOCKS5] handleConn called") // 新增
 
 	// 1. SOCKS5 握手
 	if err := Handshake(conn, conn); err != nil {

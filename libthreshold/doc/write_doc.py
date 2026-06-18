@@ -1,0 +1,17 @@
+import os
+doc = []
+doc.append("# libthreshold 项目文档")
+doc.append("")
+doc.append("## 1. 项目简介")
+doc.append("")
+doc.append("libthreshold 是一个 Linux 共享库（.so），通过 LD_PRELOAD 机制注入到任意 C 程序中，拦截网络系统调用（connect / read / write / send / recv / close），将 TCP 流量透明地转发到一个 TLS 代理服务器。")
+doc.append("")
+doc.append("核心思路：应用程序不知道代理的存在，它照常调用 connect()，但 libthreshold 拦截该调用，改为连接代理服务器，建立 TLS 通道，并通过自定义握手协议告知代理原本想连谁，由代理代为转发。")
+doc.append("")
+doc.append("---")
+doc.append("")
+doc.append("## 2. 编译环境准备")
+doc.append("")
+doc.append("安装依赖：")
+doc.append("")
+ddoc = chr(10).join(doc)

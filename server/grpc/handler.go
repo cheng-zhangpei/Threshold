@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"Threshold/pkg/waiter"
+	"Threshold/server/dispatch"
 	router_v1 "Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
 	"context"
@@ -38,6 +39,7 @@ type Handler struct {
 	portrait   *portrait.Store
 	waiter     *waiter.Waiter
 	notifySubs sync.Map
+	dm         *dispatch.DispatchManager
 }
 
 func NewHandler(
@@ -49,6 +51,8 @@ func NewHandler(
 	alertQueue *alert.AlertQueue,
 	portraitStore *portrait.Store,
 	w *waiter.Waiter,
+	dm *dispatch.DispatchManager,
+
 ) *Handler {
 	//NewWaiter()
 	return &Handler{
@@ -61,6 +65,7 @@ func NewHandler(
 		alertQueue:  alertQueue,
 		portrait:    portraitStore,
 		waiter:      w,
+		dm:          dm,
 	}
 }
 
@@ -68,7 +73,7 @@ func NewHandler(
 // EstablishConnection
 // ============================================================
 func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionInit) (*pb.ConnectionAck, error) {
-	//log.Printf("EstablishConnection called")
+	log.Printf("EstablishConnection called")
 	if req.UserId == "" || req.DeviceUuid == "" {
 		return &pb.ConnectionAck{Accepted: false, Reason: "missing user_id or device_uuid"}, nil
 	}
@@ -78,11 +83,12 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 	}
 	connIP := req.Ip
 	fp := types.DeviceFingerprint{OS: &req.OsType, IP: &connIP, UUID: &req.DeviceUuid}
+	log.Println(fp)
 	if !h.fpTree.Match(fp) {
 		log.Println("[Blocked] device not registered!")
 		return &pb.ConnectionAck{Accepted: false, Reason: "device not registered"}, nil
 	}
-
+	log.Printf("[UnBlocked] device registered: %s", connIP)
 	connID := fmt.Sprintf("conn-%s-%d", req.DeviceUuid[:8], time.Now().UnixMilli())
 	connCtx := &types.ConnectionContext{
 		ConnectionID: connID, UserID: req.UserId, DeviceUUID: req.DeviceUuid,
@@ -168,36 +174,47 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			riskLevel = h.r2.Classify(parsed)
 		}
 
-		// ----- 3. 决策 -----
+		// ----- 3. 生成请求 ID 并注册 Waiter -----
+		reqID := fmt.Sprintf("%s-%d", req.ConnectionId, time.Now().UnixNano())
+		respCh := h.waiter.Register(reqID)
+		defer h.waiter.Unregister(reqID)
+
 		var decisionResult *types.Decision
+
+		// ----- 4. 决策与分发 -----
 		if riskLevel == types.L0 {
+			// L0 直传，不入队
 			decisionResult = &types.Decision{
 				Action: types.ALLOW,
 				Reason: "L0 direct pass",
 				RuleID: "L0",
 			}
+			// L0 直接放入 OutputBuffer，携带 RequestID 以便 Sender 通过 Waiter 回传响应
+			h.outputBuf.Put(output.Message{
+				Request:   parsed,
+				Decision:  decisionResult,
+				RequestID: reqID,
+			})
 		} else {
-			var history []*types.ConnectionSummary
-			if h.portrait != nil {
-				history = h.portrait.GetHistory(parsed.UserID, 20)
+			// L1-L3 交给 DispatchManager 异步处理（内部决策 + 放入 OutputBuffer/AlertQueue）
+			// 注意：Enqueue 会阻塞等待 Worker 决策完成并返回 decisionResult
+			// Worker 会将消息（含 RequestID）放入 OutputBuffer，最终由 Sender 通过 Waiter 回传响应
+			decisionResult = h.dm.Enqueue(parsed, riskLevel, reqID)
+			if decisionResult == nil {
+				stream.Send(&pb.ProxyResponse{
+					ConnectionId: parsed.ConnectionID,
+					Status:       pb.Status_RATE_LIMITED,
+					Reason:       "dispatch failed",
+				})
+				continue
 			}
-			if h.engine != nil {
-				decisionResult = h.engine.Evaluate(connCtx, history, riskLevel)
-			} else {
-				// 降级：如果 engine 未启用，直接放行
-				decisionResult = &types.Decision{
-					Action: types.ALLOW,
-					Reason: "engine disabled, fallback",
-					RuleID: "FALLBACK",
-				}
-			}
+			// Worker 已经将消息放入 OutputBuffer/AlertQueue，这里不需要再放
 		}
 
-		// ----- 4. 阻断处理 -----
+		// ----- 5. 阻断处理（不需要等待后端响应） -----
 		if decisionResult.Action == types.BLOCK ||
 			decisionResult.Action == types.BLOCK_DEVICE ||
 			decisionResult.Action == types.BLACKLIST_DEVICE {
-			h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
 			stream.Send(&pb.ProxyResponse{
 				ConnectionId: parsed.ConnectionID,
 				Status:       pb.Status_BLOCKED,
@@ -206,26 +223,10 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 			continue
 		}
 
-		// 对于 ALERT/THROTTLE 等，仍然放行，但记录告警
-		if decisionResult.Action == types.ALERT || decisionResult.Action == types.THROTTLE {
-			h.alertQueue.Put(alert.AlertEntry{Request: parsed, Decision: decisionResult})
-		}
-
-		// ----- 5. 放行：放入 OutputBuffer，等待后端响应 -----
-		reqID := fmt.Sprintf("%s-%d", req.ConnectionId, time.Now().UnixNano())
-		respCh := h.waiter.Register(reqID)
-		defer h.waiter.Unregister(reqID)
-
-		msg := output.Message{
-			Request:   parsed,
-			Decision:  decisionResult,
-			RequestID: reqID,
-		}
-		h.outputBuf.Put(msg)
-
-		// 等待响应
+		// ----- 6. 放行：等待后端响应（通过 Waiter） -----
 		select {
 		case respData := <-respCh:
+			// 正常收到后端响应
 			if respData.Error != nil {
 				stream.Send(&pb.ProxyResponse{
 					ConnectionId: parsed.ConnectionID,
@@ -237,11 +238,11 @@ func (h *Handler) ProxyStream(stream pb.SecurityProxy_ProxyStreamServer) error {
 					ConnectionId:    parsed.ConnectionID,
 					Status:          respData.Status,
 					Reason:          respData.Reason,
-					RawHttpResponse: respData.Body,
+					RawHttpResponse: respData.Body, // 真实的业务响应数据
 				})
 			}
 		case <-time.After(h.waiter.Timeout()):
-			// 超时，移除等待
+			// 超时：移除等待，返回限流响应
 			h.waiter.Unregister(reqID)
 			stream.Send(&pb.ProxyResponse{
 				ConnectionId: parsed.ConnectionID,
@@ -385,7 +386,9 @@ func (h *Handler) RegisterDevice(ctx context.Context, req *pb.RegisterDeviceRequ
 }
 
 func (h *Handler) UnregisterDevice(ctx context.Context, req *pb.UnregisterDeviceRequest) (*pb.UnregisterDeviceResponse, error) {
-	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid}
+	osType := req.OsType
+	ip := req.Ip
+	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid, OS: &osType, IP: &ip}
 	if err := h.fpTree.Unregister("admin", fp); err != nil {
 		return &pb.UnregisterDeviceResponse{Success: false, Reason: err.Error()}, nil
 	}

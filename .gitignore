@@ -1,2 +1,7 @@
 log
 data
+libthreshold/certs
+libthreshold/cmake-build-debug
+libthreshold/.idea
+libthreshold/build
+.idea
