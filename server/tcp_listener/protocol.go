@@ -52,17 +52,12 @@ func readFrame(r io.Reader) ([]byte, error) {
 // writeRespFrame 写回响应帧: [status:1字节][4字节BE长度][payload]
 // 与客户端 frame_recv() 的格式对应
 func writeRespFrame(w io.Writer, status byte, payload []byte) error {
-	if _, err := w.Write([]byte{status}); err != nil {
-		return err
-	}
-	if err := binary.Write(w, binary.BigEndian, uint32(len(payload))); err != nil {
-		return err
-	}
-	if len(payload) > 0 {
-		_, err := w.Write(payload)
-		return err
-	}
-	return nil
+	buf := make([]byte, 1+4+len(payload))
+	buf[0] = status
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(payload)))
+	copy(buf[5:], payload)
+	_, err := w.Write(buf)
+	return err
 }
 
 // parseHandshake 解析握手包二进制数据

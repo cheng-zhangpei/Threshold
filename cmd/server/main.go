@@ -163,7 +163,7 @@ func main() {
 			tcpCfg, fpTree, alertQueue,
 			tcplistener.Deps{
 				Router:   r2,
-				DM:       dm,
+				Engine:   engine,
 				Portrait: ps,
 			},
 		)
