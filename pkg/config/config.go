@@ -11,14 +11,28 @@ import (
 // ============================================================
 
 type ServerConfig struct {
-	GRPC        GRPCConfig        `yaml:"grpc"`
-	Router      RouterConfig      `yaml:"router"`
-	Dispatch    DispatchConfig    `yaml:"dispatch"`
-	Fingerprint FingerprintConfig `yaml:"fingerprint"`
-	Portrait    PortraitConfig    `yaml:"portrait"`
-	Output      OutputConfig      `yaml:"output"`
-	Alert       AlertConfig       `yaml:"alert"`
-	TLS         TLSConfig         `yaml:"tls"`
+	GRPC          GRPCConfig          `yaml:"grpc"`
+	Router        RouterConfig        `yaml:"router"`
+	Dispatch      DispatchConfig      `yaml:"dispatch"`
+	Fingerprint   FingerprintConfig   `yaml:"fingerprint"`
+	Portrait      PortraitConfig      `yaml:"portrait"`
+	Output        OutputConfig        `yaml:"output"`
+	Alert         AlertConfig         `yaml:"alert"`
+	TLS           TLSConfig           `yaml:"tls"`
+	DirectConnect DirectConnectConfig `yaml:"direct_connect"` // ← 新增
+
+}
+
+// ============
+// DirectConnectConfig 模式三：直连模式配置
+// 客户端通过 LD_PRELOAD 劫持 TCP 连接，经 TLS 直连安全代理
+// ============
+
+type DirectConnectConfig struct {
+	Enabled    bool   `yaml:"enabled"`     // 是否启用直连模式
+	ListenAddr string `yaml:"listen_addr"` // 监听地址，如 ":9999"
+	CertFile   string `yaml:"cert_file"`   // TLS 证书文件路径（PEM 格式）
+	KeyFile    string `yaml:"key_file"`    // TLS 私钥文件路径（PEM 格式）
 }
 type OutputConfig struct {
 	MaxSize         int  `yaml:"max_size"`          // Pull 队列最大容量
@@ -164,6 +178,12 @@ func DefaultServerConfig() *ServerConfig {
 			KeyFile:           "",
 			CAFile:            "",
 			RequireClientAuth: false,
+		},
+		DirectConnect: DirectConnectConfig{ // ← 新增
+			Enabled:    false,
+			ListenAddr: ":9999",
+			CertFile:   "certs/server.crt",
+			KeyFile:    "certs/server.key",
 		},
 	}
 }

@@ -63,16 +63,22 @@ func (t *Tree) Match(fp types.DeviceFingerprint) bool {
 	current := t.root
 	for level, val := range dims {
 		var key string
-		if val == nil {
+		if val == nil || *val == "" {
 			key = NullKey
 		} else {
 			key = *val
 		}
+
+		// ← 加这两行调试日志
+		log.Printf("[FP-DEBUG] Match level=%d key=%q (raw=%v)", level, key, val)
+
 		next := current.getChild(key)
 		if next == nil {
+			log.Printf("[FP-DEBUG] Match FAILED at level=%d, key=%q NOT FOUND", level, key)
 			return false
 		}
 		if next.isLeaf {
+			log.Printf("[FP-DEBUG] Match SUCCESS at level=%d", level)
 			return true
 		}
 		if level == LayerCount-1 {

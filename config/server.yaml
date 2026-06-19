@@ -147,3 +147,13 @@ tls:
   # true: 客户端必须提供由 ca_file 签名的证书
   # false: 仅服务端提供证书（单向 TLS）
   require_client_auth: false
+direct_connect:
+  # 是否启用直连模式
+  enabled: true
+  # 监听地址，客户端的 libthreshold.so 将连接此地址
+  listen_addr: ":9999"
+  # TLS 证书文件路径（PEM 格式）
+  # 客户端需要信任签发此证书的 CA
+  cert_file: "./libthreshold/certs/server.crt"
+  # TLS 私钥文件路径（PEM 格式）
+  key_file: "./libthreshold/certs/server.key"

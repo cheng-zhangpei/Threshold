@@ -78,7 +78,7 @@ func loadTLSCredentials(cfg config.TLSConfig) (credentials.TransportCredentials,
 	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
 		log.Printf("Failed to load TLS certificates: %v", err)
-		return nil, fmt.Errorf("load cert: %w", err)
+		return nil, fmt.Errorf("load certs: %w", err)
 	}
 	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
 	if cfg.RequireClientAuth {

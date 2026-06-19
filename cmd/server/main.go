@@ -4,6 +4,7 @@ import (
 	"Threshold/pkg/waiter"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"Threshold/server/tcp_listener" // ← 新增
 	"flag"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ func main() {
 	}
 	log.SetOutput(io.MultiWriter(os.Stdout, file))
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
 	// --- 存储层 ---
 	store, err := storage.NewBoltStore(cfg.Fingerprint.DBPath)
 	if err != nil {
@@ -71,8 +73,8 @@ func main() {
 		cfg.Output.SenderEnable,
 		waiterInstance,
 	)
-	// 在服务关闭时调用 outputBuf.Stop()
 	defer outputBuf.Stop()
+
 	// --- 用户画像 + 决策引擎 ---
 	var ps *portrait.Store
 	if cfg.Portrait.Enable {
@@ -82,10 +84,11 @@ func main() {
 	if cfg.Portrait.Enable {
 		engine = decision.NewEngine(ps)
 	}
-	// --- 输出缓冲 + 告警队列 ---
+
+	// --- 告警队列 ---
 	alertQueue := alert.NewAlertQueue()
 
-	// --- DispatchManager: 异步调度 + 弹性 WorkerPool ---
+	// --- DispatchManager ---
 	policy := dispatch.PolicyFromConfig(types.PoolPolicy{
 		MinWorkers:             cfg.Dispatch.MinWorkers,
 		MaxWorkers:             cfg.Dispatch.MaxWorkers,
@@ -106,7 +109,8 @@ func main() {
 		}, outputBuf, alertQueue)
 		defer dm.Shutdown()
 	}
-	// --- Router: 事件消费型路由 ---
+
+	// --- Router ---
 	riskTable := router_v1.NewOperationRiskTable()
 	var r *router_v1.Router
 	var r2 *router_v2.Router
@@ -118,12 +122,11 @@ func main() {
 				cfg.Router.R2Config,
 				outputBuf,
 				dm,
-				3,    // consumers
-				4096, // queueSize
+				3,
+				4096,
 			)
 			defer r2.Shutdown()
 		}
-
 		if err != nil {
 			log.Fatalf("init router_v2: %v", err)
 		}
@@ -138,13 +141,44 @@ func main() {
 	}
 
 	go func() {
-		fmt.Printf("Threshold server starting on %s\n", cfg.GRPC.ListenAddr)
+		fmt.Printf("Threshold gRPC server starting on %s\n", cfg.GRPC.ListenAddr)
 		if err := grpcServer.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "grpc error: %v\n", err)
 			os.Exit(1)
 		}
 	}()
 
+	// ═══════════════════════════════════════════════════════
+	//  Mode 3: 直连模式 (Direct Connect)
+	// ═══════════════════════════════════════════════════════
+	if cfg.DirectConnect.Enabled {
+		tcpCfg := tcplistener.Config{
+			Enabled:    cfg.DirectConnect.Enabled,
+			ListenAddr: cfg.DirectConnect.ListenAddr,
+			CertFile:   cfg.DirectConnect.CertFile,
+			KeyFile:    cfg.DirectConnect.KeyFile,
+		}
+
+		tcpListener := tcplistener.New(
+			tcpCfg, fpTree, alertQueue,
+			tcplistener.Deps{
+				Router:   r2,
+				DM:       dm,
+				Portrait: ps,
+			},
+		)
+
+		go func() {
+			fmt.Printf("Threshold direct-connect starting on %s\n", tcpCfg.ListenAddr)
+			if err := tcpListener.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "tcplistener error: %v\n", err)
+				log.Printf("[tcplistener] FAILED: %v", err)
+			}
+		}()
+	} else {
+		fmt.Println("direct-connect mode disabled")
+	}
+	// --- 等待退出信号 ---
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

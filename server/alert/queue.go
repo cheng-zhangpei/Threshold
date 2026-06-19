@@ -80,3 +80,18 @@ func (q *AlertQueue) notifySubscribers(entry AlertEntry) {
 		}
 	}
 }
+
+func (q *AlertQueue) PutSimple(deviceUUID string, reason string) {
+	entry := AlertEntry{
+		Request: &types.ParsedRequest{
+			Method: "CONNECT",
+			Path:   deviceUUID, // 用 Path 字段暂存设备标识，方便排查
+		},
+		Decision: &types.Decision{
+			Action: types.BLOCK,
+			Reason: reason,
+			RuleID: "MODE3_FP",
+		},
+	}
+	q.Put(entry)
+}
