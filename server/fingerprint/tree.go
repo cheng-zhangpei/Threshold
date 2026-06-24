@@ -1,6 +1,7 @@
 package fingerprint
 
 import (
+	"Threshold/pkg/proto/pb"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -41,52 +42,24 @@ func (n *Node) hasChildren() bool {
 }
 
 type Tree struct {
-	root  *Node
-	store storage.Store
-	wal   *storage.WAL
+	root    *Node
+	store   storage.Store
+	wal     *storage.WAL
+	uuidMap map[string]types.DeviceFingerprint // UUID → 完整指纹
+
 }
 
 func NewTree(store storage.Store, wal *storage.WAL) (*Tree, error) {
 	t := &Tree{
-		root:  newNode(),
-		store: store,
-		wal:   wal,
+		root:    newNode(),
+		store:   store,
+		wal:     wal,
+		uuidMap: make(map[string]types.DeviceFingerprint),
 	}
 	if err := t.loadFromStore(); err != nil {
 		return nil, fmt.Errorf("load fingerprint tree: %w", err)
 	}
 	return t, nil
-}
-
-func (t *Tree) Match(fp types.DeviceFingerprint) bool {
-	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
-	current := t.root
-	for level, val := range dims {
-		var key string
-		if val == nil || *val == "" {
-			key = NullKey
-		} else {
-			key = *val
-		}
-
-		// ← 加这两行调试日志
-		log.Printf("[FP-DEBUG] Match level=%d key=%q (raw=%v)", level, key, val)
-
-		next := current.getChild(key)
-		if next == nil {
-			log.Printf("[FP-DEBUG] Match FAILED at level=%d, key=%q NOT FOUND", level, key)
-			return false
-		}
-		if next.isLeaf {
-			log.Printf("[FP-DEBUG] Match SUCCESS at level=%d", level)
-			return true
-		}
-		if level == LayerCount-1 {
-			return false
-		}
-		current = next
-	}
-	return false
 }
 
 // ============================================================
@@ -109,92 +82,11 @@ func (t *Tree) Register(connID string, fp types.DeviceFingerprint) error {
 	return t.wal.Commit(connID, seq, storage.WLOpPut, storage.BucketFingerprints, key, data)
 }
 
-// Unregister 从内存树和存储中删除设备指纹
-func (t *Tree) Unregister(connID string, fp types.DeviceFingerprint) error {
-	// 1. 从内存树中删除叶子节点
-	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
-	if !t.deleteLeaf(t.root, dims, 0) {
-		// 如果没找到叶子节点，返回错误（但注销可能已经注册过，所以不应报错）
-		// 直接返回 nil 以避免影响其他逻辑
-		// 但为了调试，可以打日志
-		log.Printf("[WARN] fingerprint leaf not found in memory for %v", fp)
+func dimKey(val *string) string {
+	if val == nil || *val == "" {
+		return NullKey
 	}
-
-	// 2. 从存储中删除
-	key := recordKey(fp)
-	if err := t.store.Update(func(tx storage.Tx) error {
-		return tx.Delete(storage.BucketFingerprints, key)
-	}); err != nil {
-		return fmt.Errorf("store delete: %w", err)
-	}
-
-	// 3. 写 WAL 日志（用于崩溃恢复）
-	seq, err := t.wal.Begin(connID, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
-	if err != nil {
-		return fmt.Errorf("wal begin: %w", err)
-	}
-	return t.wal.Commit(connID, seq, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
-}
-
-// deleteLeaf 递归删除路径上的叶子节点，返回是否删除成功
-func (t *Tree) deleteLeaf(node *Node, dims []*string, level int) bool {
-	if level >= len(dims) {
-		return false
-	}
-	key := NullKey
-	if dims[level] != nil {
-		key = *dims[level]
-	}
-	child := node.getChild(key)
-	if child == nil {
-		return false
-	}
-	// 如果 child 是叶子节点，删除它
-	if child.isLeaf {
-		delete(node.children, key)
-		return true
-	}
-	// 否则继续深入
-	if t.deleteLeaf(child, dims, level+1) {
-		// 如果子节点已空且不是叶子，则删除该子节点
-		if !child.hasChildren() && !child.isLeaf {
-			delete(node.children, key)
-		}
-		return true
-	}
-	return false
-}
-
-// registerInMemory
-// 遍历所有维度，nil 维度用 null 键继续下探，
-// 到达最后一个非 nil 维度时标记叶节点并停止。
-func (t *Tree) registerInMemory(fp types.DeviceFingerprint) {
-	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
-	lastNonNil := -1
-	for i, d := range dims {
-		if d != nil {
-			lastNonNil = i
-		}
-	}
-	current := t.root
-	for i, val := range dims {
-		var key string
-		if val == nil {
-			key = NullKey
-		} else {
-			key = *val
-		}
-		next := current.getChild(key)
-		if next == nil {
-			next = newNode()
-			current.setChild(key, next)
-		}
-		if i == lastNonNil {
-			next.isLeaf = true
-			return
-		}
-		current = next
-	}
+	return *val
 }
 
 // removeFromMemory 从内存树中删除指定指纹的叶子节点（递归版本）
@@ -278,19 +170,6 @@ func fpDimStr(fp types.DeviceFingerprint) string {
 	return s
 }
 
-func (t *Tree) loadFromStore() error {
-	return t.store.View(func(tx storage.Tx) error {
-		return tx.ForEach(storage.BucketFingerprints, func(k, v []byte) error {
-			var record FingerprintRecord
-			if err := json.Unmarshal(v, &record); err != nil {
-				return nil
-			}
-			t.registerInMemory(recordToFingerprint(record))
-			return nil
-		})
-	})
-}
-
 // ============================================================
 // Print 格式化打印树结构
 // ============================================================
@@ -325,4 +204,194 @@ func printNode(buf *bytes.Buffer, node *Node, prefix string, isLast bool) {
 		}
 		printNode(buf, child, newPrefix, isLastChild)
 	}
+}
+
+// ListDevices 遍历指纹树，收集所有已注册设备
+func (t *Tree) ListDevices(limit int) []*pb.DeviceInfo {
+	var devices []*pb.DeviceInfo
+	path := make([]string, LayerCount)
+	t.collectLeaves(t.root, path, 0, limit, &devices)
+	return devices
+}
+func treeKey(val *string) string {
+	if val == nil || *val == "" {
+		return NullKey
+	}
+	return *val
+}
+func (t *Tree) collectLeaves(node *Node, path []string, level int, limit int, devices *[]*pb.DeviceInfo) {
+	if limit > 0 && len(*devices) >= limit {
+		return
+	}
+
+	if node.isLeaf {
+		info := &pb.DeviceInfo{}
+		// 根据 LayerOrder 填充字段
+		// LayerOrder: os, ip, port, protocol, uuid, reserved
+		if level > 0 {
+			info.OsType = path[0] // os
+		}
+		if level > 1 {
+			info.Ip = path[1] // ip
+		}
+		// 只把有实际值的维度填入（排除 "null" 占位）
+		if info.OsType == NullKey {
+			info.OsType = ""
+		}
+		if info.Ip == NullKey {
+			info.Ip = ""
+		}
+
+		// 从路径中提取 uuid（LayerOrder[4] = "uuid"）
+		if level > 4 {
+			uuidVal := path[4]
+			if uuidVal != NullKey {
+				info.DeviceUuid = uuidVal
+			}
+		}
+		// 如果 uuid 层没到，试试从整条路径中找
+		if info.DeviceUuid == "" {
+			for i := 0; i < level; i++ {
+				if i == 4 && path[i] != NullKey {
+					info.DeviceUuid = path[i]
+					break
+				}
+			}
+		}
+
+		*devices = append(*devices, info)
+		return
+	}
+
+	for key, child := range node.children {
+		if level < LayerCount {
+			path[level] = key
+		}
+		t.collectLeaves(child, path, level+1, limit, devices)
+		if limit > 0 && len(*devices) >= limit {
+			return
+		}
+	}
+}
+
+func (t *Tree) deleteLeaf(node *Node, dims []*string, level int) bool {
+	if level >= len(dims) {
+		return false
+	}
+	key := dimKey(dims[level])
+	child := node.getChild(key)
+	if child == nil {
+		return false
+	}
+	if child.isLeaf {
+		delete(node.children, key)
+		return true
+	}
+	if t.deleteLeaf(child, dims, level+1) {
+		if !child.hasChildren() && !child.isLeaf {
+			delete(node.children, key)
+		}
+		return true
+	}
+	return false
+}
+func (t *Tree) Match(fp types.DeviceFingerprint) bool {
+	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
+	current := t.root
+	for level, val := range dims {
+		key := dimKey(val)
+
+		log.Printf("[FP-DEBUG] Match level=%d key=%q (raw=%v)", level, key, val)
+
+		next := current.getChild(key)
+		if next == nil {
+			log.Printf("[FP-DEBUG] Match FAILED at level=%d, key=%q NOT FOUND", level, key)
+			return false
+		}
+		if next.isLeaf {
+			log.Printf("[FP-DEBUG] Match SUCCESS at level=%d", level)
+			return true
+		}
+		if level == LayerCount-1 {
+			return false
+		}
+		current = next
+	}
+	return false
+}
+func (t *Tree) registerInMemory(fp types.DeviceFingerprint) {
+	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
+	lastNonNil := -1
+	for i, d := range dims {
+		if d != nil && *d != "" {
+			lastNonNil = i
+		}
+	}
+
+	// 记录 UUID → 完整指纹映射
+	if fp.UUID != nil && *fp.UUID != "" {
+		t.uuidMap[*fp.UUID] = fp
+	}
+
+	current := t.root
+	for i, val := range dims {
+		key := dimKey(val)
+		next := current.getChild(key)
+		if next == nil {
+			next = newNode()
+			current.setChild(key, next)
+		}
+		if i == lastNonNil {
+			next.isLeaf = true
+			return
+		}
+		current = next
+	}
+}
+func (t *Tree) Unregister(connID string, fp types.DeviceFingerprint) error {
+	// 按 UUID 查回注册时的完整指纹
+	uuid := ""
+	if fp.UUID != nil {
+		uuid = *fp.UUID
+	}
+	if stored, ok := t.uuidMap[uuid]; ok {
+		fp = stored
+	}
+
+	// 从内存树中删除
+	dims := []*string{fp.OS, fp.IP, fp.Port, fp.Protocol, fp.UUID, fp.Reserved}
+	if !t.deleteLeaf(t.root, dims, 0) {
+		log.Printf("[WARN] fingerprint leaf not found in memory for uuid=%s", uuid)
+	}
+
+	// 从 uuidMap 中删除
+	delete(t.uuidMap, uuid)
+
+	// 从存储中删除
+	key := recordKey(fp)
+	if err := t.store.Update(func(tx storage.Tx) error {
+		return tx.Delete(storage.BucketFingerprints, key)
+	}); err != nil {
+		return fmt.Errorf("store delete: %w", err)
+	}
+
+	// WAL 日志
+	seq, err := t.wal.Begin(connID, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
+	if err != nil {
+		return fmt.Errorf("wal begin: %w", err)
+	}
+	return t.wal.Commit(connID, seq, storage.WLOpDelete, storage.BucketFingerprints, string(key), nil)
+}
+func (t *Tree) loadFromStore() error {
+	return t.store.View(func(tx storage.Tx) error {
+		return tx.ForEach(storage.BucketFingerprints, func(k, v []byte) error {
+			var record FingerprintRecord
+			if err := json.Unmarshal(v, &record); err != nil {
+				return nil
+			}
+			fp := recordToFingerprint(record)
+			t.registerInMemory(fp)
+			return nil
+		})
+	})
 }

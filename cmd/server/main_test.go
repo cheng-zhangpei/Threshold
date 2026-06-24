@@ -2,10 +2,13 @@ package main
 
 import (
 	"Threshold/pkg/waiter"
+	"Threshold/server/admin"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"Threshold/server/token"
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -91,7 +94,16 @@ func setupTestEnv(t *testing.T) *testEnv {
 	r := router_v1.NewRouter(riskTable, outputBuf, dm, 2, 256)
 	var r2 *router_v2.Router = nil
 	grpcSrv := grpc.NewServer()
-	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
+	adminStore, err := admin.NewStore(store)
+	if err != nil {
+		log.Fatalf("init admin store: %v", err)
+	}
+
+	tokenStore, err := token.NewStore(store, "")
+	if err != nil {
+		log.Fatalf("init token store: %v", err)
+	}
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm, adminStore, tokenStore)
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 
 	lis, err := net.Listen("tcp", ":0")

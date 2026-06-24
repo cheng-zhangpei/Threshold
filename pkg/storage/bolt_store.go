@@ -30,6 +30,8 @@ func NewBoltStore(path string) (*BoltStore, error) {
 			BucketBlacklist,
 			BucketWAL,
 			BucketSeq,
+			BucketAdminTokens,
+			BucketAdminCreds,
 		} {
 			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 				return fmt.Errorf("create bucket %s: %w", name, err)

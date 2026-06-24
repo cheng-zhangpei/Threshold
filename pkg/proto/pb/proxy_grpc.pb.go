@@ -27,6 +27,8 @@ const (
 	SecurityProxy_RegisterDevice_FullMethodName      = "/proxy.SecurityProxy/RegisterDevice"
 	SecurityProxy_UnregisterDevice_FullMethodName    = "/proxy.SecurityProxy/UnregisterDevice"
 	SecurityProxy_ListDevices_FullMethodName         = "/proxy.SecurityProxy/ListDevices"
+	SecurityProxy_LoginAdmin_FullMethodName          = "/proxy.SecurityProxy/LoginAdmin"
+	SecurityProxy_InitAdmin_FullMethodName           = "/proxy.SecurityProxy/InitAdmin"
 )
 
 // SecurityProxyClient is the client API for SecurityProxy service.
@@ -79,6 +81,8 @@ type SecurityProxyClient interface {
 	RegisterDevice(ctx context.Context, in *RegisterDeviceRequest, opts ...grpc.CallOption) (*RegisterDeviceResponse, error)
 	UnregisterDevice(ctx context.Context, in *UnregisterDeviceRequest, opts ...grpc.CallOption) (*UnregisterDeviceResponse, error)
 	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
+	LoginAdmin(ctx context.Context, in *LoginAdminRequest, opts ...grpc.CallOption) (*LoginAdminResponse, error)
+	InitAdmin(ctx context.Context, in *InitAdminRequest, opts ...grpc.CallOption) (*InitAdminResponse, error)
 }
 
 type securityProxyClient struct {
@@ -184,6 +188,26 @@ func (c *securityProxyClient) ListDevices(ctx context.Context, in *ListDevicesRe
 	return out, nil
 }
 
+func (c *securityProxyClient) LoginAdmin(ctx context.Context, in *LoginAdminRequest, opts ...grpc.CallOption) (*LoginAdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LoginAdminResponse)
+	err := c.cc.Invoke(ctx, SecurityProxy_LoginAdmin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *securityProxyClient) InitAdmin(ctx context.Context, in *InitAdminRequest, opts ...grpc.CallOption) (*InitAdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InitAdminResponse)
+	err := c.cc.Invoke(ctx, SecurityProxy_InitAdmin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SecurityProxyServer is the server API for SecurityProxy service.
 // All implementations must embed UnimplementedSecurityProxyServer
 // for forward compatibility.
@@ -234,6 +258,8 @@ type SecurityProxyServer interface {
 	RegisterDevice(context.Context, *RegisterDeviceRequest) (*RegisterDeviceResponse, error)
 	UnregisterDevice(context.Context, *UnregisterDeviceRequest) (*UnregisterDeviceResponse, error)
 	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
+	LoginAdmin(context.Context, *LoginAdminRequest) (*LoginAdminResponse, error)
+	InitAdmin(context.Context, *InitAdminRequest) (*InitAdminResponse, error)
 	mustEmbedUnimplementedSecurityProxyServer()
 }
 
@@ -267,6 +293,12 @@ func (UnimplementedSecurityProxyServer) UnregisterDevice(context.Context, *Unreg
 }
 func (UnimplementedSecurityProxyServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDevices not implemented")
+}
+func (UnimplementedSecurityProxyServer) LoginAdmin(context.Context, *LoginAdminRequest) (*LoginAdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LoginAdmin not implemented")
+}
+func (UnimplementedSecurityProxyServer) InitAdmin(context.Context, *InitAdminRequest) (*InitAdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InitAdmin not implemented")
 }
 func (UnimplementedSecurityProxyServer) mustEmbedUnimplementedSecurityProxyServer() {}
 func (UnimplementedSecurityProxyServer) testEmbeddedByValue()                       {}
@@ -404,6 +436,42 @@ func _SecurityProxy_ListDevices_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SecurityProxy_LoginAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoginAdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecurityProxyServer).LoginAdmin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecurityProxy_LoginAdmin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecurityProxyServer).LoginAdmin(ctx, req.(*LoginAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SecurityProxy_InitAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InitAdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SecurityProxyServer).InitAdmin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SecurityProxy_InitAdmin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SecurityProxyServer).InitAdmin(ctx, req.(*InitAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SecurityProxy_ServiceDesc is the grpc.ServiceDesc for SecurityProxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -430,6 +498,14 @@ var SecurityProxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListDevices",
 			Handler:    _SecurityProxy_ListDevices_Handler,
+		},
+		{
+			MethodName: "LoginAdmin",
+			Handler:    _SecurityProxy_LoginAdmin_Handler,
+		},
+		{
+			MethodName: "InitAdmin",
+			Handler:    _SecurityProxy_InitAdmin_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

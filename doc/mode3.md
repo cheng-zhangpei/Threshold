@@ -1220,3 +1220,271 @@ text
 3. 3.**连接复用** — 同一目标地址复用 TCP 连接
 4. 4.**性能基准测试** — 对比 Mode 1/2 的延迟和吞吐
 5. 5.**配置文件化** — proxy 地址、CA 路径等从配置文件读取（当前为环境变量）
+
+## 三、连接池（ConnPool）
+### 3.1 为什么需要连接池
+Mode 3 的 Listener 作为代理，每个请求需要连接真实目标服务器转发数据。如果每个请求都 `net.Dial()` 新建 TCP 连接：
+
+
+
+text
+
+```
+每个请求的开销:
+  TCP 三次握手:    ~1-2ms
+  TCP 慢启动:      初始窗口小，吞吐低
+  TIME_WAIT 累积:  端口耗尽风险
+```
+
+
+
+连接池复用已有连接后，首次请求建连，后续请求直接复用，省掉了每请求一次的 TCP 握手延迟。
+
+
+
+### 3.2 连接池数据结构
+
+
+
+go
+
+```
+type ConnPool struct {
+    mu         sync.Mutex
+    conns      map[string][]*poolConn   // target → 连接栈
+    maxPerHost int                      // 每个目标地址最大连接数
+}
+
+type poolConn struct {
+    conn    net.Conn
+    created time.Time
+}
+```
+
+
+
+**设计要点：**
+
+
+
+| 设计决策                 | 说明                                          |
+| ------------------------ | --------------------------------------------- |
+| `map[string][]*poolConn` | 按目标地址（如 `127.0.0.1:8080`）分组存储连接 |
+| 栈结构（后进先出）       | 最近使用的连接优先复用，保持连接活跃          |
+| `maxPerHost = 20`        | 防止单个目标地址占用过多 fd                   |
+| `created` 时间戳         | 用于过期检查，避免复用已断开的连接            |
+| `sync.Mutex`             | 保护 map 的并发读写                           |
+
+
+
+### 3.3 连接生命周期
+
+
+
+text
+
+```
+请求到达
+    │
+    ├── pool.Get(target)
+    │   │
+    │   ├── 池中有连接 → 取栈顶
+    │   │   ├── 未过期（<60s）→ 返回
+    │   │   └── 已过期 → 关闭，重新 Dial
+    │   │
+    │   └── 池中无连接 → Dial(target) 新建
+    │
+    ├── 使用连接发送请求、读取响应
+    │
+    └── pool.Put(target, conn)
+        │
+        ├── 池未满 → 放回栈顶
+        └── 池已满 → 关闭连接（丢弃）
+```
+
+
+
+### 3.4 Get() 实现
+
+
+
+go
+
+```
+func (p *ConnPool) Get(target string) (net.Conn, error) {
+    p.mu.Lock()
+    conns := p.conns[target]
+    if len(conns) > 0 {
+        // 栈顶取出
+        pc := conns[len(conns)-1]
+        p.conns[target] = conns[:len(conns)-1]
+        p.mu.Unlock()
+
+        // 检查是否过期
+        if time.Since(pc.created) > 60*time.Second {
+            pc.conn.Close()
+            return p.dial(target)
+        }
+        return pc.conn, nil
+    }
+    p.mu.Unlock()
+
+    // 池为空，新建连接
+    return p.dial(target)
+}
+```
+
+
+
+**关键行为：**
+
+
+
+- 加锁取栈顶 → 解锁 → 检查过期 → 使用。锁持有时间极短（只做 slice 操作）
+- 过期连接关闭后直接 `Dial` 新建，调用方无感知
+- `dial()` 使用 `DialTimeout` 带 5 秒超时
+
+
+
+### 3.5 Put() 实现
+
+
+
+go
+
+```
+func (p *ConnPool) Put(target string, conn net.Conn) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+
+    conns := p.conns[target]
+    if len(conns) >= p.maxPerHost {
+        conn.Close()  // 池满，丢弃
+        return
+    }
+    p.conns[target] = append(conns, &poolConn{
+        conn:    conn,
+        created: time.Now(),
+    })
+}
+```
+
+
+
+**关键行为：**
+
+
+
+- 池满时直接关闭连接，不阻塞
+- 放回时记录当前时间，用于下次 `Get()` 的过期检查
+
+
+
+### 3.6 连接失效处理
+
+
+
+连接池不主动做心跳探活。连接失效在使用时发现：
+
+
+
+text
+
+```
+pool.Get() → 返回连接
+    │
+    ├── Write 请求数据 → 失败（连接已断开）
+    │   │
+    │   ├── 关闭连接
+    │   └── 重试：pool.Get() → 新建连接 → 重新写入
+    │
+    └── Read 响应数据 → 失败（连接已断开）
+        │
+        └── 关闭连接，返回错误
+```
+
+
+
+这种"惰性检测"模式在短请求场景下足够高效 — 一次失败请求的代价是额外一次 `Dial`，大约 1-2ms。
+
+```
+curl (被 LD_PRELOAD 劫持)
+    │
+    │ connect(127.0.0.1:8080) → 被 .so 改为 connect(127.0.0.1:9999)
+    │ TLS 握手
+    │ 发送握手包 (UUID + 目标地址 127.0.0.1:8080)
+    │
+    ▼
+Listener.handle(conn)
+    │
+    ├── ① TLS Accept + 握手
+    ├── ② readFrame → parseHandshake → 提取 UUID + 目标
+    ├── ③ 指纹校验 → 通过
+    ├── ④ writeRespFrame(OK) → 客户端收到握手成功
+    │
+    ▼
+Listener 请求循环
+    │
+    │ curl write("GET /get?key=key-0001 HTTP/1.1\r\n...")
+    │   → .so frame_send → TLS → readFrame
+    │
+    ├── ⑤ secureRoute
+    │       │
+    │       ├── 解析 HTTP → ParsedRequest{Method=GET, Path=/get?key=key-0001}
+    │       ├── Router.Classify → L1
+    │       ├── DecisionEngine.Evaluate → AUDIT（放行）
+    │       │
+    │       ▼
+    │   forwardWithPool
+    │       │
+    │       ├── pool.Get("127.0.0.1:8080") → 返回已有连接
+    │       ├── conn.Write("GET /get?key=key-0001 HTTP/1.1\r\n...")
+    │       ├── http.ReadResponse → 读取 HTTP 响应
+    │       ├── 重建完整 HTTP 响应字节
+    │       ├── writeRespFrame(OK, 响应) → TLS → .so
+    │       └── pool.Put("127.0.0.1:8080", conn) → 放回连接池
+    │
+    │ curl read() → .so consume_recv_buf → 收到响应
+    │
+    ▼
+curl 输出 HTTP 响应
+```
+
+### 4.2 每个阶段的耗时分解
+
+
+
+基准测试（boltdb 后端）中的实际测量值：
+
+
+
+| 阶段                         | 耗时    | 说明                      |
+| ---------------------------- | ------- | ------------------------- |
+| TLS 加解密（.so ↔ Listener） | ~1ms    | OpenSSL + crypto/tls      |
+| 帧编解码                     | ~0.1ms  | 4字节长度前缀 + 拷贝      |
+| Router 分级                  | ~0.1ms  | 规则匹配（静态表查找）    |
+| Decision 评估                | ~0.2ms  | R99 兜底规则匹配          |
+| 连接池 Get                   | ~0.01ms | 栈顶取出（复用时）        |
+| net.Dial（首次）             | ~1-2ms  | 仅首次请求，后续复用      |
+| 发送到目标 + 读取响应        | ~0.3ms  | boltdb 极快               |
+| HTTP 响应解析                | ~0.1ms  | bufio + http.ReadResponse |
+
+
+
+**总计：~2ms（连接复用后）**
+
+
+
+### 4.3 连接复用 vs 不复用的对比
+
+
+
+| 指标     | 不复用（每次 Dial） | 连接池复用 | 提升     |
+| -------- | ------------------- | ---------- | -------- |
+| QPS      | 573                 | 2,179      | **3.8x** |
+| P50 延迟 | 8.4ms               | 2.1ms      | **4x**   |
+| P99 延迟 | 15.3ms              | 6.1ms      | **2.5x** |
+
+
+
+提升来源：省掉了每请求一次 TCP 三次握手（~1-2ms）和连接建立的系统调用开销。

@@ -1,10 +1,13 @@
 package grpc
 
 import (
+	"Threshold/pkg/storage"
 	"Threshold/pkg/waiter"
+	"Threshold/server/admin"
 	"Threshold/server/dispatch"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"Threshold/server/token"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -40,6 +43,7 @@ func New(
 	portraitStore *portrait.Store,
 	waiter *waiter.Waiter,
 	dm *dispatch.DispatchManager,
+	db *storage.BoltStore,
 ) (*Server, error) {
 	var opts []grpc.ServerOption
 
@@ -57,9 +61,32 @@ func New(
 		}
 		opts = append(opts, grpc.Creds(creds))
 	}
-
 	grpcServer := grpc.NewServer(opts...)
-	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter, dm)
+	adminStore, err := admin.NewStore(db)
+	if err != nil {
+		log.Fatalf("init admin store: %v", err)
+	}
+
+	tokenStore, err := token.NewStore(db, "")
+	if err != nil {
+		log.Fatalf("init token store: %v", err)
+	}
+	// 检查是否已有管理员
+	if !adminStore.HasAdmin() {
+		// 生成一次性口令
+		passcode, err := admin.GeneratePasscode("./data")
+		if err != nil {
+			log.Fatalf("generate passcode: %v", err)
+		}
+		fmt.Println("========================================")
+		fmt.Println("  Admin not initialized.")
+		fmt.Printf("  One-time passcode: %s\n", passcode)
+		fmt.Println("  Run: adminctl init -passcode <code> -user admin -pass <password>")
+		fmt.Println("========================================")
+	} else {
+		fmt.Println("Admin already initialized.")
+	}
+	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter, dm, adminStore, tokenStore)
 	pb.RegisterSecurityProxyServer(grpcServer, handler)
 
 	listener, err := net.Listen("tcp", cfg.GRPC.ListenAddr)

@@ -28,6 +28,8 @@ const (
 	BucketWAL           = "wal"
 	BucketSeq           = "seq"
 	BucketDispatchTasks = "dispatch_tasks"
+	BucketAdminTokens   = "admin_tokens"
+	BucketAdminCreds    = "admin_credentials"
 )
 
 var (

@@ -57,6 +57,9 @@ service SecurityProxy {
     rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
     rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
     rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+    rpc LoginAdmin(LoginAdminRequest) returns (LoginAdminResponse);
+    rpc InitAdmin(InitAdminRequest) returns (InitAdminResponse);
+
 }
 
 // ============================================================
@@ -189,6 +192,8 @@ message RegisterDeviceRequest {
 	string device_uuid = 1;
 	string os_type = 2;
 	string ip = 3;
+  string token = 4;
+
 }
 
 message RegisterDeviceResponse {
@@ -200,6 +205,8 @@ message UnregisterDeviceRequest {
 	string device_uuid = 1;
   string os_type = 2;
   string ip = 3;
+  string token = 4;
+
 }
 
 message UnregisterDeviceResponse {
@@ -209,6 +216,8 @@ message UnregisterDeviceResponse {
 
 message ListDevicesRequest {
 	int32 limit = 1;
+  string token = 2;
+
 }
 
 message DeviceInfo {
@@ -220,3 +229,30 @@ message DeviceInfo {
 message ListDevicesResponse {
 	repeated DeviceInfo devices = 1;
 }
+
+// 新增消息
+message InitAdminRequest {
+  string passcode = 1;
+  string username = 2;
+  string password = 3;
+
+}
+
+message InitAdminResponse {
+  bool success = 1;
+  string reason = 2;
+}
+
+message LoginAdminRequest {
+  string username = 1;
+  string password = 2;
+  int64 ttl_seconds = 3;
+}
+
+message LoginAdminResponse {
+  bool success = 1;
+  string token = 2;
+  string reason = 3;
+  int64 expires_at = 4;
+}
+

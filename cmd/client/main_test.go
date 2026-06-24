@@ -2,8 +2,10 @@ package main
 
 import (
 	"Threshold/pkg/waiter"
+	"Threshold/server/admin"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"Threshold/server/token"
 	"context"
 	"fmt"
 	"log"
@@ -97,8 +99,16 @@ func setupEnv(t *testing.T) *testEnv {
 	}
 	grpcSrv := grpc.NewServer()
 	// 修改 NewHandler 调用：传入 dm 和 waiter，移除 engine
-	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
+	adminStore, err := admin.NewStore(store)
+	if err != nil {
+		log.Fatalf("init admin store: %v", err)
+	}
 
+	tokenStore, err := token.NewStore(store, "")
+	if err != nil {
+		log.Fatalf("init token store: %v", err)
+	}
+	handler := servergrpc.NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm, adminStore, tokenStore)
 	pb.RegisterSecurityProxyServer(grpcSrv, handler)
 	go grpcSrv.Serve(srvLis)
 	srvAddr := srvLis.Addr().String()

@@ -134,7 +134,7 @@ func main() {
 	}
 
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm, store)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)

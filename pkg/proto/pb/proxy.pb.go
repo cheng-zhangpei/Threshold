@@ -535,6 +535,7 @@ type RegisterDeviceRequest struct {
 	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
 	OsType        string                 `protobuf:"bytes,2,opt,name=os_type,json=osType,proto3" json:"os_type,omitempty"`
 	Ip            string                 `protobuf:"bytes,3,opt,name=ip,proto3" json:"ip,omitempty"`
+	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -586,6 +587,13 @@ func (x *RegisterDeviceRequest) GetOsType() string {
 func (x *RegisterDeviceRequest) GetIp() string {
 	if x != nil {
 		return x.Ip
+	}
+	return ""
+}
+
+func (x *RegisterDeviceRequest) GetToken() string {
+	if x != nil {
+		return x.Token
 	}
 	return ""
 }
@@ -647,6 +655,7 @@ type UnregisterDeviceRequest struct {
 	DeviceUuid    string                 `protobuf:"bytes,1,opt,name=device_uuid,json=deviceUuid,proto3" json:"device_uuid,omitempty"`
 	OsType        string                 `protobuf:"bytes,2,opt,name=os_type,json=osType,proto3" json:"os_type,omitempty"`
 	Ip            string                 `protobuf:"bytes,3,opt,name=ip,proto3" json:"ip,omitempty"`
+	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -698,6 +707,13 @@ func (x *UnregisterDeviceRequest) GetOsType() string {
 func (x *UnregisterDeviceRequest) GetIp() string {
 	if x != nil {
 		return x.Ip
+	}
+	return ""
+}
+
+func (x *UnregisterDeviceRequest) GetToken() string {
+	if x != nil {
+		return x.Token
 	}
 	return ""
 }
@@ -757,6 +773,7 @@ func (x *UnregisterDeviceResponse) GetReason() string {
 type ListDevicesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -796,6 +813,13 @@ func (x *ListDevicesRequest) GetLimit() int32 {
 		return x.Limit
 	}
 	return 0
+}
+
+func (x *ListDevicesRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
 }
 
 type DeviceInfo struct {
@@ -902,6 +926,247 @@ func (x *ListDevicesResponse) GetDevices() []*DeviceInfo {
 	return nil
 }
 
+// 新增消息
+type InitAdminRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Passcode      string                 `protobuf:"bytes,1,opt,name=passcode,proto3" json:"passcode,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Password      string                 `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitAdminRequest) Reset() {
+	*x = InitAdminRequest{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitAdminRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitAdminRequest) ProtoMessage() {}
+
+func (x *InitAdminRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitAdminRequest.ProtoReflect.Descriptor instead.
+func (*InitAdminRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *InitAdminRequest) GetPasscode() string {
+	if x != nil {
+		return x.Passcode
+	}
+	return ""
+}
+
+func (x *InitAdminRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *InitAdminRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type InitAdminResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitAdminResponse) Reset() {
+	*x = InitAdminResponse{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitAdminResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitAdminResponse) ProtoMessage() {}
+
+func (x *InitAdminResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitAdminResponse.ProtoReflect.Descriptor instead.
+func (*InitAdminResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *InitAdminResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *InitAdminResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type LoginAdminRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	TtlSeconds    int64                  `protobuf:"varint,3,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginAdminRequest) Reset() {
+	*x = LoginAdminRequest{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginAdminRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginAdminRequest) ProtoMessage() {}
+
+func (x *LoginAdminRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginAdminRequest.ProtoReflect.Descriptor instead.
+func (*LoginAdminRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *LoginAdminRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *LoginAdminRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *LoginAdminRequest) GetTtlSeconds() int64 {
+	if x != nil {
+		return x.TtlSeconds
+	}
+	return 0
+}
+
+type LoginAdminResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginAdminResponse) Reset() {
+	*x = LoginAdminResponse{}
+	mi := &file_pkg_proto_proxy_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginAdminResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginAdminResponse) ProtoMessage() {}
+
+func (x *LoginAdminResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_proxy_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginAdminResponse.ProtoReflect.Descriptor instead.
+func (*LoginAdminResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_proxy_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *LoginAdminResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *LoginAdminResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *LoginAdminResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *LoginAdminResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
 var File_pkg_proto_proxy_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_proxy_proto_rawDesc = "" +
@@ -941,25 +1206,28 @@ const file_pkg_proto_proxy_proto_rawDesc = "" +
 	"\rconnection_id\x18\x01 \x01(\tR\fconnectionId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"$\n" +
 	"\bCloseAck\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"a\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"w\n" +
 	"\x15RegisterDeviceRequest\x12\x1f\n" +
 	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
 	"deviceUuid\x12\x17\n" +
 	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
-	"\x02ip\x18\x03 \x01(\tR\x02ip\"J\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\x12\x14\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\"J\n" +
 	"\x16RegisterDeviceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"c\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"y\n" +
 	"\x17UnregisterDeviceRequest\x12\x1f\n" +
 	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
 	"deviceUuid\x12\x17\n" +
 	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
-	"\x02ip\x18\x03 \x01(\tR\x02ip\"L\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\x12\x14\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\"L\n" +
 	"\x18UnregisterDeviceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"*\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"@\n" +
 	"\x12ListDevicesRequest\x12\x14\n" +
-	"\x05limit\x18\x01 \x01(\x05R\x05limit\"V\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x14\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"V\n" +
 	"\n" +
 	"DeviceInfo\x12\x1f\n" +
 	"\vdevice_uuid\x18\x01 \x01(\tR\n" +
@@ -967,12 +1235,30 @@ const file_pkg_proto_proxy_proto_rawDesc = "" +
 	"\aos_type\x18\x02 \x01(\tR\x06osType\x12\x0e\n" +
 	"\x02ip\x18\x03 \x01(\tR\x02ip\"B\n" +
 	"\x13ListDevicesResponse\x12+\n" +
-	"\adevices\x18\x01 \x03(\v2\x11.proxy.DeviceInfoR\adevices*@\n" +
+	"\adevices\x18\x01 \x03(\v2\x11.proxy.DeviceInfoR\adevices\"f\n" +
+	"\x10InitAdminRequest\x12\x1a\n" +
+	"\bpasscode\x18\x01 \x01(\tR\bpasscode\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\"E\n" +
+	"\x11InitAdminResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"l\n" +
+	"\x11LoginAdminRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1f\n" +
+	"\vttl_seconds\x18\x03 \x01(\x03R\n" +
+	"ttlSeconds\"{\n" +
+	"\x12LoginAdminResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\x03R\texpiresAt*@\n" +
 	"\x06Status\x12\x06\n" +
 	"\x02OK\x10\x00\x12\v\n" +
 	"\aBLOCKED\x10\x01\x12\x0f\n" +
 	"\vBLACKLISTED\x10\x02\x12\x10\n" +
-	"\fRATE_LIMITED\x10\x032\xb6\x04\n" +
+	"\fRATE_LIMITED\x10\x032\xb9\x05\n" +
 	"\rSecurityProxy\x12<\n" +
 	"\vProxyStream\x12\x13.proxy.ProxyRequest\x1a\x14.proxy.ProxyResponse(\x010\x01\x12B\n" +
 	"\x13EstablishConnection\x12\x15.proxy.ConnectionInit\x1a\x14.proxy.ConnectionAck\x12:\n" +
@@ -981,7 +1267,10 @@ const file_pkg_proto_proxy_proto_rawDesc = "" +
 	"\x0fSubscribeNotify\x12\x14.proxy.NotifyRequest\x1a\x12.proxy.NotifyEvent0\x01\x12M\n" +
 	"\x0eRegisterDevice\x12\x1c.proxy.RegisterDeviceRequest\x1a\x1d.proxy.RegisterDeviceResponse\x12S\n" +
 	"\x10UnregisterDevice\x12\x1e.proxy.UnregisterDeviceRequest\x1a\x1f.proxy.UnregisterDeviceResponse\x12D\n" +
-	"\vListDevices\x12\x19.proxy.ListDevicesRequest\x1a\x1a.proxy.ListDevicesResponseB\x18Z\x16Threshold/pkg/proto/pbb\x06proto3"
+	"\vListDevices\x12\x19.proxy.ListDevicesRequest\x1a\x1a.proxy.ListDevicesResponse\x12A\n" +
+	"\n" +
+	"LoginAdmin\x12\x18.proxy.LoginAdminRequest\x1a\x19.proxy.LoginAdminResponse\x12>\n" +
+	"\tInitAdmin\x12\x17.proxy.InitAdminRequest\x1a\x18.proxy.InitAdminResponseB\x18Z\x16Threshold/pkg/proto/pbb\x06proto3"
 
 var (
 	file_pkg_proto_proxy_proto_rawDescOnce sync.Once
@@ -996,7 +1285,7 @@ func file_pkg_proto_proxy_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_proxy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_pkg_proto_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_pkg_proto_proxy_proto_goTypes = []any{
 	(Status)(0),                      // 0: proxy.Status
 	(*ProxyRequest)(nil),             // 1: proxy.ProxyRequest
@@ -1012,34 +1301,42 @@ var file_pkg_proto_proxy_proto_goTypes = []any{
 	(*ListDevicesRequest)(nil),       // 11: proxy.ListDevicesRequest
 	(*DeviceInfo)(nil),               // 12: proxy.DeviceInfo
 	(*ListDevicesResponse)(nil),      // 13: proxy.ListDevicesResponse
-	nil,                              // 14: proxy.ProxyRequest.MetadataEntry
-	(*PullRequest)(nil),              // 15: proxy.PullRequest
-	(*NotifyRequest)(nil),            // 16: proxy.NotifyRequest
-	(*ApprovedMessage)(nil),          // 17: proxy.ApprovedMessage
-	(*NotifyEvent)(nil),              // 18: proxy.NotifyEvent
+	(*InitAdminRequest)(nil),         // 14: proxy.InitAdminRequest
+	(*InitAdminResponse)(nil),        // 15: proxy.InitAdminResponse
+	(*LoginAdminRequest)(nil),        // 16: proxy.LoginAdminRequest
+	(*LoginAdminResponse)(nil),       // 17: proxy.LoginAdminResponse
+	nil,                              // 18: proxy.ProxyRequest.MetadataEntry
+	(*PullRequest)(nil),              // 19: proxy.PullRequest
+	(*NotifyRequest)(nil),            // 20: proxy.NotifyRequest
+	(*ApprovedMessage)(nil),          // 21: proxy.ApprovedMessage
+	(*NotifyEvent)(nil),              // 22: proxy.NotifyEvent
 }
 var file_pkg_proto_proxy_proto_depIdxs = []int32{
-	14, // 0: proxy.ProxyRequest.metadata:type_name -> proxy.ProxyRequest.MetadataEntry
+	18, // 0: proxy.ProxyRequest.metadata:type_name -> proxy.ProxyRequest.MetadataEntry
 	0,  // 1: proxy.ProxyResponse.status:type_name -> proxy.Status
 	12, // 2: proxy.ListDevicesResponse.devices:type_name -> proxy.DeviceInfo
 	1,  // 3: proxy.SecurityProxy.ProxyStream:input_type -> proxy.ProxyRequest
 	3,  // 4: proxy.SecurityProxy.EstablishConnection:input_type -> proxy.ConnectionInit
 	5,  // 5: proxy.SecurityProxy.CloseConnection:input_type -> proxy.ConnectionClose
-	15, // 6: proxy.SecurityProxy.PullApproved:input_type -> proxy.PullRequest
-	16, // 7: proxy.SecurityProxy.SubscribeNotify:input_type -> proxy.NotifyRequest
+	19, // 6: proxy.SecurityProxy.PullApproved:input_type -> proxy.PullRequest
+	20, // 7: proxy.SecurityProxy.SubscribeNotify:input_type -> proxy.NotifyRequest
 	7,  // 8: proxy.SecurityProxy.RegisterDevice:input_type -> proxy.RegisterDeviceRequest
 	9,  // 9: proxy.SecurityProxy.UnregisterDevice:input_type -> proxy.UnregisterDeviceRequest
 	11, // 10: proxy.SecurityProxy.ListDevices:input_type -> proxy.ListDevicesRequest
-	2,  // 11: proxy.SecurityProxy.ProxyStream:output_type -> proxy.ProxyResponse
-	4,  // 12: proxy.SecurityProxy.EstablishConnection:output_type -> proxy.ConnectionAck
-	6,  // 13: proxy.SecurityProxy.CloseConnection:output_type -> proxy.CloseAck
-	17, // 14: proxy.SecurityProxy.PullApproved:output_type -> proxy.ApprovedMessage
-	18, // 15: proxy.SecurityProxy.SubscribeNotify:output_type -> proxy.NotifyEvent
-	8,  // 16: proxy.SecurityProxy.RegisterDevice:output_type -> proxy.RegisterDeviceResponse
-	10, // 17: proxy.SecurityProxy.UnregisterDevice:output_type -> proxy.UnregisterDeviceResponse
-	13, // 18: proxy.SecurityProxy.ListDevices:output_type -> proxy.ListDevicesResponse
-	11, // [11:19] is the sub-list for method output_type
-	3,  // [3:11] is the sub-list for method input_type
+	16, // 11: proxy.SecurityProxy.LoginAdmin:input_type -> proxy.LoginAdminRequest
+	14, // 12: proxy.SecurityProxy.InitAdmin:input_type -> proxy.InitAdminRequest
+	2,  // 13: proxy.SecurityProxy.ProxyStream:output_type -> proxy.ProxyResponse
+	4,  // 14: proxy.SecurityProxy.EstablishConnection:output_type -> proxy.ConnectionAck
+	6,  // 15: proxy.SecurityProxy.CloseConnection:output_type -> proxy.CloseAck
+	21, // 16: proxy.SecurityProxy.PullApproved:output_type -> proxy.ApprovedMessage
+	22, // 17: proxy.SecurityProxy.SubscribeNotify:output_type -> proxy.NotifyEvent
+	8,  // 18: proxy.SecurityProxy.RegisterDevice:output_type -> proxy.RegisterDeviceResponse
+	10, // 19: proxy.SecurityProxy.UnregisterDevice:output_type -> proxy.UnregisterDeviceResponse
+	13, // 20: proxy.SecurityProxy.ListDevices:output_type -> proxy.ListDevicesResponse
+	17, // 21: proxy.SecurityProxy.LoginAdmin:output_type -> proxy.LoginAdminResponse
+	15, // 22: proxy.SecurityProxy.InitAdmin:output_type -> proxy.InitAdminResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1058,7 +1355,7 @@ func file_pkg_proto_proxy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_proxy_proto_rawDesc), len(file_pkg_proto_proxy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

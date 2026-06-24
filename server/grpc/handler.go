@@ -2,9 +2,11 @@ package grpc
 
 import (
 	"Threshold/pkg/waiter"
+	"Threshold/server/admin"
 	"Threshold/server/dispatch"
 	router_v1 "Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
+	"Threshold/server/token"
 	"context"
 	"fmt"
 	"log"
@@ -40,6 +42,9 @@ type Handler struct {
 	waiter     *waiter.Waiter
 	notifySubs sync.Map
 	dm         *dispatch.DispatchManager
+
+	AdminStore *admin.Store
+	TokenStore *token.Store
 }
 
 func NewHandler(
@@ -52,7 +57,8 @@ func NewHandler(
 	portraitStore *portrait.Store,
 	w *waiter.Waiter,
 	dm *dispatch.DispatchManager,
-
+	AdminStore *admin.Store,
+	TokenStore *token.Store,
 ) *Handler {
 	//NewWaiter()
 	return &Handler{
@@ -66,6 +72,8 @@ func NewHandler(
 		portrait:    portraitStore,
 		waiter:      w,
 		dm:          dm,
+		AdminStore:  AdminStore,
+		TokenStore:  TokenStore,
 	}
 }
 
@@ -370,11 +378,95 @@ func (h *Handler) BroadcastNotify(event *pb.NotifyEvent) {
 }
 
 // ============================================================
+// Admin: 初始化管理员（仅首次可用）
+// TODO(cheng) 为了安全起见我们暂时只设置一个管理员，并且只能被调用一次，
+// ============================================================
+func (h *Handler) InitAdmin(ctx context.Context, req *pb.InitAdminRequest) (*pb.InitAdminResponse, error) {
+	if h.AdminStore == nil {
+		return &pb.InitAdminResponse{Success: false, Reason: "admin store not initialized"}, nil
+	}
+
+	if h.AdminStore.HasAdmin() {
+		return &pb.InitAdminResponse{Success: false, Reason: "admin already initialized"}, nil
+	}
+
+	if req.Username == "" || req.Password == "" {
+		return &pb.InitAdminResponse{Success: false, Reason: "username and password are required"}, nil
+	}
+
+	// 验证一次性口令
+	if err := admin.ValidatePasscode("./data", req.Passcode); err != nil {
+		log.Printf("[ADMIN] init failed: invalid passcode")
+		return &pb.InitAdminResponse{Success: false, Reason: "invalid passcode"}, nil
+	}
+
+	if err := h.AdminStore.InitAdmin(req.Username, req.Password); err != nil {
+		return &pb.InitAdminResponse{Success: false, Reason: err.Error()}, nil
+	}
+
+	log.Printf("[ADMIN] admin initialized: user=%s", req.Username)
+	return &pb.InitAdminResponse{Success: true}, nil
+}
+
+// ============================================================
+// Admin: 登录获取 Token
+// ============================================================
+
+func (h *Handler) LoginAdmin(ctx context.Context, req *pb.LoginAdminRequest) (*pb.LoginAdminResponse, error) {
+	if h.AdminStore == nil || h.TokenStore == nil {
+		return &pb.LoginAdminResponse{Success: false, Reason: "admin/token store not initialized"}, nil
+	}
+
+	// 验证密码
+	if err := h.AdminStore.Verify(req.Username, req.Password); err != nil {
+		log.Printf("[ADMIN] login failed: user=%s err=%v", req.Username, err)
+		return &pb.LoginAdminResponse{Success: false, Reason: "invalid credentials"}, nil
+	}
+
+	// TTL: 客户端请求 vs 服务端上限
+	maxTTL := 7 * 24 * time.Hour // 7 天上限
+	requestedTTL := time.Duration(req.TtlSeconds) * time.Second
+	if requestedTTL <= 0 || requestedTTL > maxTTL {
+		requestedTTL = 24 * time.Hour
+	}
+
+	tokenStr, expiresAt, err := h.TokenStore.Generate(req.Username, requestedTTL)
+	if err != nil {
+		return &pb.LoginAdminResponse{Success: false, Reason: fmt.Sprintf("token generation failed: %v", err)}, nil
+	}
+
+	log.Printf("[ADMIN] login success: user=%s ttl=%v", req.Username, requestedTTL)
+	return &pb.LoginAdminResponse{
+		Success:   true,
+		Token:     tokenStr,
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (h *Handler) validateAdminToken(tokenStr string) error {
+	if h.TokenStore == nil {
+		return fmt.Errorf("token store not initialized")
+	}
+	if tokenStr == "" {
+		return fmt.Errorf("token is required")
+	}
+	_, err := h.TokenStore.Validate(tokenStr)
+	if err != nil {
+		return fmt.Errorf("token validation failed: %w", err)
+	}
+	return nil
+}
+
+// ============================================================
 // Admin: Device management
-// TODO 后面这些接口全部都要改，改为管理员接口，这个必须在server启动的时候就动态注入进去的
 // ============================================================
 
 func (h *Handler) RegisterDevice(ctx context.Context, req *pb.RegisterDeviceRequest) (*pb.RegisterDeviceResponse, error) {
+	// Token 校验
+	if err := h.validateAdminToken(req.Token); err != nil {
+		return &pb.RegisterDeviceResponse{Success: false, Reason: err.Error()}, nil
+	}
+
 	osType := req.OsType
 	ip := req.Ip
 	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid, OS: &osType, IP: &ip}
@@ -386,6 +478,11 @@ func (h *Handler) RegisterDevice(ctx context.Context, req *pb.RegisterDeviceRequ
 }
 
 func (h *Handler) UnregisterDevice(ctx context.Context, req *pb.UnregisterDeviceRequest) (*pb.UnregisterDeviceResponse, error) {
+	// Token 校验
+	if err := h.validateAdminToken(req.Token); err != nil {
+		return &pb.UnregisterDeviceResponse{Success: false, Reason: err.Error()}, nil
+	}
+
 	osType := req.OsType
 	ip := req.Ip
 	fp := types.DeviceFingerprint{UUID: &req.DeviceUuid, OS: &osType, IP: &ip}
@@ -397,7 +494,12 @@ func (h *Handler) UnregisterDevice(ctx context.Context, req *pb.UnregisterDevice
 }
 
 func (h *Handler) ListDevices(ctx context.Context, req *pb.ListDevicesRequest) (*pb.ListDevicesResponse, error) {
-	// TODO: iterate fingerprint tree to list all registered devices
-	// For now return empty list
-	return &pb.ListDevicesResponse{Devices: []*pb.DeviceInfo{}}, nil
+	// Token 校验
+	if err := h.validateAdminToken(req.Token); err != nil {
+		return nil, fmt.Errorf("auth failed: %w", err)
+	}
+	// 遍历指纹树获取已注册设备
+	devices := h.fpTree.ListDevices(int(req.GetLimit()))
+	log.Printf("[ADMIN] list devices: count=%d limit=%d", len(devices), req.GetLimit())
+	return &pb.ListDevicesResponse{Devices: devices}, nil
 }
