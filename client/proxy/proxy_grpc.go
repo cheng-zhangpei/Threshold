@@ -29,6 +29,8 @@ type LocalProxy struct {
 	osType       string
 	mu           sync.RWMutex
 	connections  map[string]*connState
+	dialOpts     []grpc.DialOption // 新增
+
 }
 
 type connState struct {
@@ -46,6 +48,8 @@ type Config struct {
 	DeviceUUID string
 	UserID     string
 	OSType     string
+	DialOpts   []grpc.DialOption // 新增
+
 }
 
 func New(cfg Config) *LocalProxy {
@@ -56,12 +60,18 @@ func New(cfg Config) *LocalProxy {
 		userID:      cfg.UserID,
 		osType:      cfg.OSType,
 		connections: make(map[string]*connState),
+		dialOpts:    cfg.DialOpts,
 	}
 }
-
 func (p *LocalProxy) Start() error {
+	// 使用传入的 DialOpts，没有则降级为 insecure
+	opts := p.dialOpts
+	if len(opts) == 0 {
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	}
+
 	var err error
-	p.serverConn, err = grpc.NewClient(p.serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	p.serverConn, err = grpc.NewClient(p.serverAddr, opts...)
 	if err != nil {
 		return fmt.Errorf("dial server: %w", err)
 	}
@@ -78,7 +88,6 @@ func (p *LocalProxy) Start() error {
 	log.Printf("[CLIENT] proxy listening on %s", p.listenAddr)
 	return p.grpcServer.Serve(lis)
 }
-
 func (p *LocalProxy) Stop() {
 	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()

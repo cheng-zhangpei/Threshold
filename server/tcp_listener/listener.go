@@ -7,11 +7,13 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -25,6 +27,7 @@ type Config struct {
 	ListenAddr string
 	CertFile   string
 	KeyFile    string
+	CACertFile string
 }
 
 type FingerMatcher interface {
@@ -123,22 +126,7 @@ type Listener struct {
 func New(cfg Config, fp FingerMatcher, alert AlertSender, deps Deps) *Listener {
 	return &Listener{cfg: cfg, fp: fp, alert: alert, deps: deps, pool: NewConnPool()}
 }
-
 func (l *Listener) Start() error {
-	// ① TLS 握手
-	/*
-	 * 加载 TLS 证书
-	 *
-	 * 为什么服务端需要证书？
-	 *   TLS 的工作方式是：
-	 *     服务端有一个"身份证"（证书），里面包含公钥
-	 *     客户端连接时，服务端出示证书
-	 *     客户端验证证书是真的（由可信 CA 签发）
-	 *     然后双方用证书里的公钥协商出一个对称加密密钥
-	 *     之后所有数据用这个对称密钥加密传输
-	 *     CertFile = 证书文件（公钥 + 身份信息 + CA 签名）
-	 *     KeyFile  = 私钥文件（只有服务端持有，用于解密和签名）
-	 */
 	cert, err := tls.LoadX509KeyPair(l.cfg.CertFile, l.cfg.KeyFile)
 	if err != nil {
 		return fmt.Errorf("load TLS cert: %w", err)
@@ -147,6 +135,25 @@ func (l *Listener) Start() error {
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
+	}
+
+	// 加载 CA 证书，启用 mTLS（验证客户端证书）
+	if l.cfg.CACertFile != "" {
+		caCert, err := os.ReadFile(l.cfg.CACertFile)
+		if err != nil {
+			log.Printf("[tcplistener] WARN: failed to load CA cert: %v", err)
+		} else {
+			pool := x509.NewCertPool()
+			if pool.AppendCertsFromPEM(caCert) {
+				tlsCfg.ClientCAs = pool
+				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+				log.Printf("[tcplistener] mTLS enabled (CA=%s)", l.cfg.CACertFile)
+			}
+		}
+	}
+
+	if tlsCfg.ClientAuth == tls.NoClientCert {
+		log.Printf("[tcplistener] TLS: one-way (no client cert required)")
 	}
 
 	ln, err := tls.Listen("tcp", l.cfg.ListenAddr, tlsCfg)

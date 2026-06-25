@@ -154,6 +154,6 @@ direct_connect:
   listen_addr: ":9999"
   # TLS 证书文件路径（PEM 格式）
   # 客户端需要信任签发此证书的 CA
-  cert_file: "./libthreshold/certs/server.crt"
+  cert_file: "./data/certs/server.crt"
   # TLS 私钥文件路径（PEM 格式）
-  key_file: "./libthreshold/certs/server.key"
+  key_file: "./data/certs/server.key"

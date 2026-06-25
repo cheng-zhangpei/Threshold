@@ -1,10 +1,11 @@
 package main
 
 import (
+	"Threshold/pkg/pki"
 	"Threshold/pkg/waiter"
 	"Threshold/server/router/router_v1"
 	"Threshold/server/router/router_v2"
-	"Threshold/server/tcp_listener" // ← 新增
+	"Threshold/server/tcp_listener"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +25,8 @@ import (
 	servergrpc "Threshold/server/grpc"
 	"Threshold/server/output"
 	"Threshold/server/portrait"
+
+	"google.golang.org/grpc/credentials"
 )
 
 func main() {
@@ -133,8 +136,27 @@ func main() {
 		fmt.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
 	}
 
+	// ============================================================
+	// gRPC TLS 配置（自动检测证书，有则 mTLS，无则降级）
+	// ============================================================
+	serverCertPath := "./data/certs/server.crt"
+	serverKeyPath := "./data/certs/server.key"
+	caCertPath := "./data/ca/ca.crt"
+
+	var grpcCreds credentials.TransportCredentials
+	if _, err := os.Stat(serverCertPath); err == nil {
+		tlsCfg, err := pki.ServerTLSConfig(serverCertPath, serverKeyPath, caCertPath)
+		if err != nil {
+			log.Fatalf("server TLS config: %v", err)
+		}
+		grpcCreds = credentials.NewTLS(tlsCfg)
+		fmt.Println("gRPC server: mTLS enabled")
+	} else {
+		fmt.Println("gRPC server: no TLS (dev mode)")
+	}
+
 	// --- gRPC Server ---
-	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm, store)
+	grpcServer, err := servergrpc.New(cfg, fpTree, engine, r, r2, outputBuf, alertQueue, ps, waiterInstance, dm, store, grpcCreds)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc server: %v\n", err)
 		os.Exit(1)
@@ -157,6 +179,7 @@ func main() {
 			ListenAddr: cfg.DirectConnect.ListenAddr,
 			CertFile:   cfg.DirectConnect.CertFile,
 			KeyFile:    cfg.DirectConnect.KeyFile,
+			CACertFile: "./data/ca/ca.crt", // 指定一下证书的位置
 		}
 
 		tcpListener := tcplistener.New(
@@ -178,6 +201,7 @@ func main() {
 	} else {
 		fmt.Println("direct-connect mode disabled")
 	}
+
 	// --- 等待退出信号 ---
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

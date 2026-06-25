@@ -14,5 +14,6 @@ int tls_ctx_init(void);
  * 杩斿洖 SSL* 鎸囬拡锛岃皟鐢ㄨ€呴渶鎸佹湁瀹? * 澶辫触杩斿洖 NULL
  */
 SSL *tls_connect(int fd);
+void tls_ctx_cleanup(void);  // 新增
 
 #endif

@@ -8,40 +8,48 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
+	"Threshold/pkg/pki"
 	pb "Threshold/pkg/proto/pb"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-const tokenFile = ".threshold_admin_token"
+const tokenFile = "admin.token"
 
-var serverAddr string
+// 全局记录原始 args，子命令不再 shift os.Args
+var originalArgs []string
 
 func main() {
-	if len(os.Args) < 2 {
+	originalArgs = os.Args
+	if len(originalArgs) < 2 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	cmd := os.Args[1]
-	os.Args = os.Args[1:]
+	cmd := originalArgs[1]
 
 	switch cmd {
 	case "init":
-		cmdInit()
+		cmdInit(originalArgs[2:])
 	case "login":
-		cmdLogin()
+		cmdLogin(originalArgs[2:])
 	case "logout":
-		cmdLogout()
+		cmdLogout(originalArgs[2:])
 	case "register":
-		cmdRegister()
+		cmdRegister(originalArgs[2:])
 	case "unregister":
-		cmdUnregister()
+		cmdUnregister(originalArgs[2:])
 	case "list":
-		cmdList()
+		cmdList(originalArgs[2:])
+	case "ca":
+		cmdCA(originalArgs[2:])
+	case "cert":
+		cmdCert(originalArgs[2:])
 	default:
 		printUsage()
 		os.Exit(1)
@@ -61,28 +69,138 @@ Commands:
   register     Register a device to fingerprint tree
   unregister   Remove a device from fingerprint tree
   list         List all registered devices
-
-Common Flags:
-  -server    Threshold server address (default: 127.0.0.1:50051)
+  ca init      Initialize Certificate Authority
+  cert issue   Issue a TLS certificate
 
 Examples:
-  adminctl init -server 127.0.0.1:50051 -user admin -pass mypassword
+  adminctl ca init
+  adminctl cert issue -type server -hosts 127.0.0.1,localhost
+  adminctl cert issue -type client -uuid my-device
+  adminctl init -passcode <code> -user admin -pass mypassword
   adminctl login -server 127.0.0.1:50051 -user admin -pass mypassword -ttl 24h
-  adminctl register -uuid my-device -os linux -ip 10.0.0.1
-  adminctl list -limit 50
+  adminctl register -server 127.0.0.1:50051 -uuid my-device -os linux
+  adminctl list -server 127.0.0.1:50051
   adminctl logout`)
 }
 
 // ============================================================
-// init — 首次初始化管理员
+// ca — CA 管理
 // ============================================================
-func cmdInit() {
+
+func cmdCA(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: adminctl ca init")
+		os.Exit(1)
+	}
+
+	sub := args[0]
+	switch sub {
+	case "init":
+		cmdCAInit(args[1:])
+	default:
+		fmt.Println("Usage: adminctl ca init")
+		os.Exit(1)
+	}
+}
+
+func cmdCAInit(args []string) {
+	fs := flag.NewFlagSet("ca init", flag.ExitOnError)
+	dir := fs.String("dir", "./data/ca", "CA output directory")
+	fs.Parse(args)
+
+	ca, err := pki.InitCA(*dir)
+	if err != nil {
+		log.Fatalf("CA init failed: %v", err)
+	}
+
+	fmt.Println("CA initialized successfully.")
+	fmt.Printf("  CA cert: %s\n", ca.CertPath)
+	fmt.Printf("  CA key:  %s\n", ca.KeyPath)
+	fmt.Printf("  Valid until: %s\n", ca.Cert.NotAfter.Format("2006-01-02"))
+}
+
+// ============================================================
+// cert — 证书管理
+// ============================================================
+
+func cmdCert(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: adminctl cert issue [-type server|client] ...")
+		os.Exit(1)
+	}
+
+	sub := args[0]
+	switch sub {
+	case "issue":
+		cmdCertIssue(args[1:])
+	default:
+		fmt.Println("Usage: adminctl cert issue")
+		os.Exit(1)
+	}
+}
+
+func cmdCertIssue(args []string) {
+	fs := flag.NewFlagSet("cert issue", flag.ExitOnError)
+	certType := fs.String("type", "client", "certificate type: server or client")
+	uuid := fs.String("uuid", "", "device UUID (required for client cert)")
+	hosts := fs.String("hosts", "127.0.0.1", "comma-separated IPs/domains (for server cert)")
+	days := fs.Int("days", 365, "validity in days")
+	caDir := fs.String("ca-dir", "./data/ca", "CA directory")
+	outDir := fs.String("out-dir", "./data/certs", "output directory")
+	fs.Parse(args)
+
+	ca, err := pki.LoadCA(*caDir)
+	if err != nil {
+		log.Fatalf("load CA: %v (run 'adminctl ca init' first)", err)
+	}
+
+	var req pki.CertRequest
+	switch *certType {
+	case "server":
+		req = pki.CertRequest{
+			Type:      pki.CertTypeServer,
+			Hosts:     strings.Split(*hosts, ","),
+			ValidDays: *days,
+		}
+	case "client":
+		if *uuid == "" {
+			log.Fatal("error: -uuid is required for client cert")
+		}
+		req = pki.CertRequest{
+			Type:      pki.CertTypeClient,
+			UUID:      *uuid,
+			ValidDays: *days,
+		}
+	default:
+		log.Fatalf("unknown type: %s (use server or client)", *certType)
+	}
+
+	bundle, err := ca.IssueCert(req, *outDir)
+	if err != nil {
+		log.Fatalf("issue cert: %v", err)
+	}
+
+	fmt.Printf("Certificate issued:\n")
+	fmt.Printf("  Type: %s\n", *certType)
+	if *certType == "client" {
+		fmt.Printf("  UUID: %s\n", *uuid)
+	}
+	fmt.Printf("  Cert: %s\n", bundle.CertPath)
+	fmt.Printf("  Key:  %s\n", bundle.KeyPath)
+	fmt.Printf("  Valid until: %s\n", time.Now().AddDate(0, 0, *days).Format("2006-01-02"))
+}
+
+// ============================================================
+// init — 初始化管理员
+// ============================================================
+
+func cmdInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	server := fs.String("server", "127.0.0.1:50051", "server address")
 	user := fs.String("user", "", "admin username")
 	pass := fs.String("pass", "", "admin password")
-	passcode := fs.String("passcode", "", "one-time passcode from server output")
-	fs.Parse(os.Args[1:])
+	passcode := fs.String("passcode", "", "one-time passcode from server")
+	fs.Parse(args)
 
 	if *user == "" || *pass == "" {
 		log.Fatal("error: -user and -pass are required")
@@ -115,16 +233,16 @@ func cmdInit() {
 }
 
 // ============================================================
-// login — 登录获取 Token 并保存到本地
+// login
 // ============================================================
 
-func cmdLogin() {
+func cmdLogin(args []string) {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	server := fs.String("server", "127.0.0.1:50051", "server address")
 	user := fs.String("user", "", "admin username")
 	pass := fs.String("pass", "", "admin password")
 	ttl := fs.String("ttl", "24h", "token TTL (e.g. 1h, 24h, 7d)")
-	fs.Parse(os.Args[1:])
+	fs.Parse(args)
 
 	if *user == "" || *pass == "" {
 		log.Fatal("error: -user and -pass are required")
@@ -164,10 +282,10 @@ func cmdLogin() {
 }
 
 // ============================================================
-// logout — 删除本地 Token
+// logout
 // ============================================================
 
-func cmdLogout() {
+func cmdLogout(args []string) {
 	path := tokenFilePath()
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
@@ -181,16 +299,16 @@ func cmdLogout() {
 }
 
 // ============================================================
-// register — 注册设备
+// register
 // ============================================================
 
-func cmdRegister() {
+func cmdRegister(args []string) {
 	fs := flag.NewFlagSet("register", flag.ExitOnError)
 	server := fs.String("server", "127.0.0.1:50051", "server address")
 	uuid := fs.String("uuid", "", "device UUID (required)")
 	osType := fs.String("os", "linux", "OS type")
 	ip := fs.String("ip", "", "device IP (auto-detect if empty)")
-	fs.Parse(os.Args[1:])
+	fs.Parse(args)
 
 	if *uuid == "" {
 		log.Fatal("error: -uuid is required")
@@ -224,16 +342,16 @@ func cmdRegister() {
 }
 
 // ============================================================
-// unregister — 注销设备
+// unregister
 // ============================================================
 
-func cmdUnregister() {
+func cmdUnregister(args []string) {
 	fs := flag.NewFlagSet("unregister", flag.ExitOnError)
 	server := fs.String("server", "127.0.0.1:50051", "server address")
 	uuid := fs.String("uuid", "", "device UUID (required)")
 	osType := fs.String("os", "linux", "OS type")
 	ip := fs.String("ip", "", "device IP")
-	fs.Parse(os.Args[1:])
+	fs.Parse(args)
 
 	if *uuid == "" {
 		log.Fatal("error: -uuid is required")
@@ -264,14 +382,14 @@ func cmdUnregister() {
 }
 
 // ============================================================
-// list — 列出已注册设备
+// list
 // ============================================================
 
-func cmdList() {
+func cmdList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	server := fs.String("server", "127.0.0.1:50051", "server address")
 	limit := fs.Int("limit", 100, "max devices to list")
-	fs.Parse(os.Args[1:])
+	fs.Parse(args)
 
 	tk := mustLoadToken()
 	client, conn := connect(*server)
@@ -306,7 +424,23 @@ func cmdList() {
 // ============================================================
 
 func connect(addr string) (pb.SecurityProxyClient, *grpc.ClientConn) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	clientCertPath := "./data/certs/adminctl-client.crt"
+	clientKeyPath := "./data/certs/adminctl-client.key"
+	caCertPath := "./data/ca/ca.crt"
+
+	var opts []grpc.DialOption
+
+	if _, err := os.Stat(clientCertPath); err == nil {
+		tlsCfg, err := pki.ClientTLSConfig(clientCertPath, clientKeyPath, caCertPath)
+		if err != nil {
+			log.Fatalf("client TLS config: %v", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		log.Fatalf("connect to %s: %v", addr, err)
 	}
@@ -324,7 +458,7 @@ func mustLoadToken() string {
 func tokenFilePath() string {
 	dir := "./data"
 	os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "admin.token")
+	return filepath.Join(dir, tokenFile)
 }
 
 func saveToken(token string) error {

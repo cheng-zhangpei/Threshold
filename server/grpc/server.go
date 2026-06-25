@@ -44,6 +44,7 @@ func New(
 	waiter *waiter.Waiter,
 	dm *dispatch.DispatchManager,
 	db *storage.BoltStore,
+	grpcCreds credentials.TransportCredentials,
 ) (*Server, error) {
 	var opts []grpc.ServerOption
 
@@ -53,15 +54,13 @@ func New(
 		grpc.StreamInterceptor(StreamServerInterceptor(limiter)),
 	)
 
-	if cfg.TLS.Enabled {
-		creds, err := loadTLSCredentials(cfg.TLS)
-		if err != nil {
-			log.Printf("Failed to load TLS credentials: %v", err)
-			return nil, fmt.Errorf("load tls: %w", err)
-		}
-		opts = append(opts, grpc.Creds(creds))
+	// TLS：由 main 传入，有则启用 mTLS
+	if grpcCreds != nil {
+		opts = append(opts, grpc.Creds(grpcCreds))
 	}
+
 	grpcServer := grpc.NewServer(opts...)
+
 	adminStore, err := admin.NewStore(db)
 	if err != nil {
 		log.Fatalf("init admin store: %v", err)
@@ -71,9 +70,8 @@ func New(
 	if err != nil {
 		log.Fatalf("init token store: %v", err)
 	}
-	// 检查是否已有管理员
+
 	if !adminStore.HasAdmin() {
-		// 生成一次性口令
 		passcode, err := admin.GeneratePasscode("./data")
 		if err != nil {
 			log.Fatalf("generate passcode: %v", err)
@@ -86,6 +84,7 @@ func New(
 	} else {
 		fmt.Println("Admin already initialized.")
 	}
+
 	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter, dm, adminStore, tokenStore)
 	pb.RegisterSecurityProxyServer(grpcServer, handler)
 
