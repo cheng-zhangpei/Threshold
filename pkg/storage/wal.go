@@ -1,349 +1,427 @@
 package storage
 
 import (
-	"encoding/binary"
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// ============================================================
-// WALEntry WAL 日志条目
-// 每条记录描述一次待持久化的写操作，用于崩溃恢复。
-// ============================================================
+const (
+	// WLOpPut    写入操作（与原接口保持一致）
+	// WLOpDelete 删除操作（与原接口保持一致）
+	WLOpPut    = "PUT"
+	WLOpDelete = "DELETE"
+)
 
-type WALEntry struct {
-	ConnectionID string    `json:"connection_id"` // 关联的连接标识
-	Sequence     uint64    `json:"sequence"`      // 序列号，保证同一连接内有序
-	Operation    WLOpType  `json:"operation"`     // 操作类型
-	Bucket       string    `json:"bucket"`        // 目标 bucket
-	Key          string    `json:"key"`           // 目标 key
-	Value        []byte    `json:"value"`         // 目标 value（PUT 操作时有值）
-	Timestamp    time.Time `json:"timestamp"`     // 操作时间
-	Status       WLStatus  `json:"status"`        // 条目状态
+// WAL 内部条目状态
+const (
+	walPending    = "p" // 已写入，未确认
+	walCommitted  = "c" // 已确认，待刷盘
+	walCheckpoint = "k" // 刷盘点（标记此 seq 之前的数据已持久化到 bbolt）
+)
+
+const (
+	walFileName     = "wal.log"
+	walBufSize      = 64 * 1024   // 写缓冲 64KB
+	walMaxEntrySize = 1024 * 1024 // 单条目上限 1MB
+)
+
+// walEntry 单条 WAL 日志条目
+// 使用短字段名减少磁盘占用
+type walEntry struct {
+	Seq    uint64 `json:"s"`            // 全局递增序号
+	Status string `json:"t"`            // p=pending, c=committed, k=checkpoint
+	ConnID string `json:"id,omitempty"` // 仅 pending：连接标识
+	Op     string `json:"o,omitempty"`  // 仅 pending：PUT | DELETE
+	Bucket string `json:"b,omitempty"`  // 仅 pending：目标 bucket
+	Key    string `json:"k,omitempty"`  // 仅 pending：key
+	Data   []byte `json:"d,omitempty"`  // 仅 pending：value
 }
 
-// WLOpType WAL 操作类型
-type WLOpType string
-
-const (
-	WLOpPut    WLOpType = "PUT"    // 写入操作
-	WLOpDelete WLOpType = "DELETE" // 删除操作
-)
-
-// WLStatus WAL 条目状态
-type WLStatus string
-
-const (
-	WLStatusPending   WLStatus = "PENDING"   // 写入中，尚未提交
-	WLStatusCommitted WLStatus = "COMMITTED" // 已提交，等待清理
-)
-
-// WAL WAL 预写日志
-// 所有持久化操作通过 WAL 统一管理：
-//   1. 写操作前：写入 PENDING 日志
-//   2. 执行实际写操作（同一事务内）
-//   3. 标记 COMMITTED
-//   4. 定期清理已提交的日志
-// 崩溃恢复时扫描残留的 PENDING 记录并重放。
-// ============================================================
-
+// WAL Write-Ahead Log（LSM 风格）
+//
+// 写入路径（无 bbolt I/O）：
+//
+//	Begin()  → 顺序追加 pending 条目（~数百字节）
+//	Commit() → 顺序追加 committed 标记（~20 字节）
+//
+// 刷盘路径（后台）：
+//
+//	Flush()  → 读取已提交条目 → 批量写入 bbolt → 写 checkpoint → 截断旧条目
+//
+// 恢复路径：
+//
+//	loadFromStore() 加载 bbolt 快照
+//	Replay() 回放 checkpoint 之后的已提交操作
 type WAL struct {
-	store Store
+	mu      sync.Mutex
+	file    *os.File
+	writer  *bufio.Writer
+	seq     atomic.Uint64
+	logPath string
+
+	// 刷盘
+	store       Store
+	flushTicker *time.Ticker
+	flushDone   chan struct{}
 }
 
-// NewWAL 创建 WAL 实例
-func NewWAL(store Store) *WAL {
-	return &WAL{store: store}
-}
+// NewWAL 创建 WAL 实例，自动恢复最大序号
+func NewWAL(dir string) (*WAL, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("create wal dir %s: %w", dir, err)
+	}
 
-// ============================================================
-// WAL 键格式
-// bucket: wal
-// key:    {connection_id}:{sequence_number:big_endian_uint64}
-// 这样 PrefixScan(conn_id) 就能取出某个连接的所有 WAL 记录，
-// 且按 sequence 自然排序。
-// ============================================================
-
-// walKey 组装 WAL 键
-func walKey(connID string, seq uint64) []byte {
-	buf := make([]byte, len(connID)+8)
-	copy(buf, connID)
-	binary.BigEndian.PutUint64(buf[len(connID):], seq)
-	return buf
-}
-
-// nextSeq 获取连接的下一个 WAL 序列号
-func (w *WAL) nextSeq(tx Tx, connID string) (uint64, error) {
-	val, err := tx.Get(BucketSeq, []byte(connID))
+	logPath := filepath.Join(dir, walFileName)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
+		return nil, fmt.Errorf("open wal %s: %w", logPath, err)
+	}
+
+	w := &WAL{
+		file:      f,
+		writer:    bufio.NewWriterSize(f, walBufSize),
+		logPath:   logPath,
+		flushDone: make(chan struct{}),
+	}
+
+	maxSeq, err := w.scanMaxSeq()
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("scan wal: %w", err)
+	}
+	w.seq.Store(maxSeq)
+
+	log.Printf("[WAL] initialized, path=%s, next_seq=%d", logPath, maxSeq+1)
+	return w, nil
+}
+
+// ============================================================
+// 接口不变：Begin / Commit
+// ============================================================
+
+// Begin 追加 pending 条目，返回分配的序号
+// 签名与原实现完全一致
+func (w *WAL) Begin(connID, op, bucket, key string, data []byte) (uint64, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	seq := w.seq.Add(1)
+	entry := walEntry{
+		Seq:    seq,
+		Status: walPending,
+		ConnID: connID,
+		Op:     op,
+		Bucket: bucket,
+		Key:    key,
+		Data:   data,
+	}
+	if err := w.writeEntry(entry); err != nil {
 		return 0, err
 	}
-	if val == nil {
-		return 1, nil
+	return seq, nil
+}
+
+// Commit 追加 committed 标记（仅 seq + status，约 20 字节）
+// 签名与原实现完全一致，多余参数不使用，仅为保持接口兼容
+// 不触发 bbolt 写入，bbolt 写入由后台 Flush 负责
+func (w *WAL) Commit(connID string, seq uint64, op, bucket, key string, data []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.writeEntry(walEntry{
+		Seq:    seq,
+		Status: walCommitted,
+	})
+}
+
+// ============================================================
+// Close
+// ============================================================
+
+func (w *WAL) Close() error {
+	w.StopFlusher()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := w.writer.Flush(); err != nil {
+		return err
 	}
-	return binary.BigEndian.Uint64(val) + 1, nil
-}
-
-// setSeq 更新连接的当前序列号
-func (w *WAL) setSeq(tx Tx, connID string, seq uint64) error {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, seq)
-	return tx.Put(BucketSeq, []byte(connID), buf)
+	return w.file.Close()
 }
 
 // ============================================================
-// Begin 开始一次 WAL 保护的写操作
-// 返回 WAL 序列号，后续 Commit 需要使用此序列号。
-// 日志条目状态为 PENDING。
+// 后台刷盘：WAL → bbolt
 // ============================================================
 
-func (w *WAL) Begin(connID string, op WLOpType, bucket, key string, value []byte) (seq uint64, err error) {
-	err = w.store.Update(func(tx Tx) error {
-		var err error
-		seq, err = w.nextSeq(tx, connID)
-		if err != nil {
-			return fmt.Errorf("get next seq: %w", err)
-		}
-
-		entry := WALEntry{
-			ConnectionID: connID,
-			Sequence:     seq,
-			Operation:    op,
-			Bucket:       bucket,
-			Key:          key,
-			Value:        value,
-			Timestamp:    time.Now(),
-			Status:       WLStatusPending,
-		}
-
-		data, err := json.Marshal(entry)
-		if err != nil {
-			return fmt.Errorf("marshal wal entry: %w", err)
-		}
-
-		if err := tx.Put(BucketWAL, walKey(connID, seq), data); err != nil {
-			return fmt.Errorf("write wal entry: %w", err)
-		}
-
-		if err := w.setSeq(tx, connID, seq); err != nil {
-			return fmt.Errorf("update seq: %w", err)
-		}
-
-		return nil
-	})
-	return
-}
-
-// ============================================================
-// Commit 提交 WAL 保护的写操作
-// 1. 执行实际的数据写入/删除（在同一事务内）
-// 2. 标记 WAL 条目为 COMMITTED
-// 3. 清理该连接所有已提交的 WAL 条目
-// ============================================================
-
-func (w *WAL) Commit(connID string, seq uint64, op WLOpType, bucket, key string, value []byte) error {
-	return w.store.Update(func(tx Tx) error {
-		// 1. 执行实际操作
-		switch op {
-		case WLOpPut:
-			if err := tx.Put(bucket, []byte(key), value); err != nil {
-				return fmt.Errorf("data put: %w", err)
-			}
-		case WLOpDelete:
-			if err := tx.Delete(bucket, []byte(key)); err != nil {
-				return fmt.Errorf("data delete: %w", err)
+// StartFlusher 启动后台定时刷盘
+func (w *WAL) StartFlusher(store Store, interval time.Duration) {
+	w.store = store
+	w.flushTicker = time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-w.flushTicker.C:
+				if err := w.Flush(); err != nil {
+					log.Printf("[WAL] flush error: %v", err)
+				}
+			case <-w.flushDone:
+				return
 			}
 		}
-
-		// 2. 标记 WAL 条目为 COMMITTED
-		walData, err := tx.Get(BucketWAL, walKey(connID, seq))
-		if err != nil {
-			return fmt.Errorf("get wal entry: %w", err)
-		}
-		if walData != nil {
-			var entry WALEntry
-			if err := json.Unmarshal(walData, &entry); err == nil {
-				entry.Status = WLStatusCommitted
-				committed, _ := json.Marshal(entry)
-				tx.Put(BucketWAL, walKey(connID, seq), committed)
-			}
-		}
-
-		// 3. 清理已提交的 WAL 条目
-		w.cleanupCommitted(tx, connID)
-
-		return nil
-	})
+	}()
+	log.Printf("[WAL] flusher started, interval=%v", interval)
 }
 
-// cleanupCommitted 清理指定连接的已提交 WAL 条目
-// 先收集待删除的 key 列表，再统一删除，避免在遍历中修改 bucket。
-func (w *WAL) cleanupCommitted(tx Tx, connID string) {
-	var toDelete [][]byte
-
-	// 第一遍：扫描收集所有已提交的 key
-	tx.ForEach(BucketWAL, func(k, v []byte) error {
-		// 只处理属于当前连接的条目
-		if len(k) < len(connID)+8 || string(k[:len(connID)]) != connID {
-			return nil
-		}
-		var entry WALEntry
-		if err := json.Unmarshal(v, &entry); err != nil {
-			return nil
-		}
-		if entry.Status == WLStatusCommitted {
-			ck := make([]byte, len(k))
-			copy(ck, k)
-			toDelete = append(toDelete, ck)
-		}
-		return nil
-	})
-
-	// 第二遍：统一删除
-	for _, dk := range toDelete {
-		tx.Delete(BucketWAL, dk)
+// StopFlusher 停止刷盘并执行最后一次 flush
+func (w *WAL) StopFlusher() {
+	if w.flushTicker != nil {
+		w.flushTicker.Stop()
 	}
+	select {
+	case <-w.flushDone:
+	default:
+		close(w.flushDone)
+	}
+	if err := w.Flush(); err != nil {
+		log.Printf("[WAL] final flush error: %v", err)
+	}
+	log.Printf("[WAL] flusher stopped")
 }
 
-// ============================================================
-// Recover 崩溃恢复
-// 扫描 WAL bucket 中所有 PENDING 状态的条目，逐条重放。
-// 先收集再处理，避免 ForEach 期间修改 bucket。
-// ============================================================
+// 新增方法：设置刷盘目标存储
+func (w *WAL) SetStore(store Store) {
+	w.store = store
+}
 
-func (w *WAL) Recover() (int, error) {
-	var pending []struct {
-		key   []byte
-		entry WALEntry
-	}
-
-	// 1. 收集所有 PENDING 条目
-	err := w.store.View(func(tx Tx) error {
-		return tx.ForEach(BucketWAL, func(k, v []byte) error {
-			var entry WALEntry
-			if err := json.Unmarshal(v, &entry); err != nil {
-				return nil
-			}
-			if entry.Status == WLStatusPending {
-				ck := make([]byte, len(k))
-				copy(ck, k)
-				pending = append(pending, struct {
-					key   []byte
-					entry WALEntry
-				}{ck, entry})
-			}
-			return nil
-		})
-	})
+// 修改 Flush：store 未设置时直接返回，不写 checkpoint、不截断
+func (w *WAL) Flush() error {
+	entries, lastSeq, err := w.readCommittedSinceCheckpoint()
 	if err != nil {
-		return 0, fmt.Errorf("scan wal: %w", err)
+		return fmt.Errorf("read committed: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil
 	}
 
-	if len(pending) == 0 {
-		return 0, nil
+	// ---- 新增：store 未设置时跳过（保持 WAL 完整） ----
+	if w.store == nil {
+		return nil
 	}
 
-	// 2. 在事务中逐条重放
-	replayed := 0
-	err = w.store.Update(func(tx Tx) error {
-		for _, p := range pending {
-			switch p.entry.Operation {
+	// 批量写入 bbolt
+	if err := w.store.Update(func(tx Tx) error {
+		for _, e := range entries {
+			switch e.Op {
 			case WLOpPut:
-				if err := tx.Put(p.entry.Bucket, []byte(p.entry.Key), p.entry.Value); err != nil {
-					return fmt.Errorf("replay put: %w", err)
+				if err := tx.Put(e.Bucket, []byte(e.Key), e.Data); err != nil {
+					return err
 				}
 			case WLOpDelete:
-				if err := tx.Delete(p.entry.Bucket, []byte(p.entry.Key)); err != nil {
-					return fmt.Errorf("replay delete: %w", err)
+				if err := tx.Delete(e.Bucket, []byte(e.Key)); err != nil {
+					return err
 				}
 			}
-
-			// 标记为 COMMITTED 并清理
-			p.entry.Status = WLStatusCommitted
-			committed, _ := json.Marshal(p.entry)
-			tx.Put(BucketWAL, p.key, committed)
-			replayed++
-		}
-
-		// 清理所有已提交的 WAL 条目
-		w.cleanupAllCommitted(tx)
-		return nil
-	})
-	return replayed, err
-}
-
-// ============================================================
-// CleanupAll 清理所有已提交的 WAL 条目
-// 可由后台定时任务调用
-// ============================================================
-
-func (w *WAL) CleanupAll() (int, error) {
-	cleaned := 0
-	err := w.store.Update(func(tx Tx) error {
-		var toDelete [][]byte
-		tx.ForEach(BucketWAL, func(k, v []byte) error {
-			var entry WALEntry
-			if err := json.Unmarshal(v, &entry); err != nil {
-				return nil
-			}
-			if entry.Status == WLStatusCommitted {
-				ck := make([]byte, len(k))
-				copy(ck, k)
-				toDelete = append(toDelete, ck)
-			}
-			return nil
-		})
-		for _, dk := range toDelete {
-			tx.Delete(BucketWAL, dk)
-			cleaned++
 		}
 		return nil
-	})
-	return cleaned, err
-}
-
-// cleanupAllCommitted 清理所有已提交的 WAL 条目（事务内调用）
-func (w *WAL) cleanupAllCommitted(tx Tx) {
-	var toDelete [][]byte
-	tx.ForEach(BucketWAL, func(k, v []byte) error {
-		var entry WALEntry
-		if err := json.Unmarshal(v, &entry); err != nil {
-			return nil
-		}
-		if entry.Status == WLStatusCommitted {
-			ck := make([]byte, len(k))
-			copy(ck, k)
-			toDelete = append(toDelete, ck)
-		}
-		return nil
-	})
-	for _, dk := range toDelete {
-		tx.Delete(BucketWAL, dk)
+	}); err != nil {
+		return fmt.Errorf("batch apply to store: %w", err)
 	}
+
+	// checkpoint + 截断
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := w.writeEntry(walEntry{
+		Seq:    lastSeq,
+		Status: walCheckpoint,
+	}); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+
+	log.Printf("[WAL] flushed %d entries, checkpoint_seq=%d", len(entries), lastSeq)
+	return w.truncateBefore(lastSeq)
 }
 
 // ============================================================
-// GetPending 获取指定连接的所有 PENDING WAL 条目
-// 用于调试和审计
+// 恢复：启动时回放 WAL
 // ============================================================
 
-func (w *WAL) GetPending(connID string) ([]WALEntry, error) {
-	var entries []WALEntry
-	err := w.store.View(func(tx Tx) error {
-		return tx.ForEach(BucketWAL, func(k, v []byte) error {
-			if len(k) < len(connID)+8 || string(k[:len(connID)]) != connID {
-				return nil
-			}
-			var entry WALEntry
-			if err := json.Unmarshal(v, &entry); err != nil {
-				return nil
-			}
-			if entry.Status == WLStatusPending {
-				entries = append(entries, entry)
-			}
-			return nil
-		})
+// Replay 回放 checkpoint 之后的所有已提交操作
+// fn(op, key, data) 由调用方实现（注册到内存树 / 删除内存节点）
+func (w *WAL) Replay(fn func(op, key string, data []byte) error) error {
+	entries, _, err := w.readCommittedSinceCheckpoint()
+	if err != nil {
+		return fmt.Errorf("replay read: %w", err)
+	}
+
+	for _, e := range entries {
+		if err := fn(e.Op, e.Key, e.Data); err != nil {
+			return fmt.Errorf("replay seq=%d op=%s key=%s: %w", e.Seq, e.Op, e.Key, err)
+		}
+	}
+
+	if len(entries) > 0 {
+		log.Printf("[WAL] replayed %d operations", len(entries))
+	}
+	return nil
+}
+
+// ============================================================
+// 内部方法
+// ============================================================
+
+func (w *WAL) writeEntry(entry walEntry) error {
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal entry: %w", err)
+	}
+	raw = append(raw, '\n')
+	if _, err := w.writer.Write(raw); err != nil {
+		return fmt.Errorf("write entry: %w", err)
+	}
+	return w.writer.Flush()
+}
+
+// scanMaxSeq 扫描 WAL 文件中最大的 seq（启动时调用）
+func (w *WAL) scanMaxSeq() (uint64, error) {
+	var maxSeq uint64
+	err := w.scanFile(func(entry walEntry) bool {
+		if entry.Seq > maxSeq {
+			maxSeq = entry.Seq
+		}
+		return true
 	})
-	return entries, err
+	return maxSeq, err
+}
+
+// scanFile 用独立 fd 扫描 WAL 文件，callback 返回 false 提前终止
+func (w *WAL) scanFile(fn func(walEntry) bool) error {
+	f, err := os.Open(w.logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, walBufSize), walMaxEntrySize)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry walEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			log.Printf("[WAL] skip malformed entry: %.80s...", string(line))
+			continue
+		}
+		if !fn(entry) {
+			break
+		}
+	}
+	return scanner.Err()
+}
+
+// readCommittedSinceCheckpoint 单次扫描，返回 checkpoint 之后的所有已提交操作
+func (w *WAL) readCommittedSinceCheckpoint() ([]walEntry, uint64, error) {
+	var checkpointSeq uint64
+	pending := make(map[uint64]walEntry)
+	committed := make(map[uint64]bool)
+
+	err := w.scanFile(func(entry walEntry) bool {
+		switch entry.Status {
+		case walCheckpoint:
+			// checkpoint 之前的数据已刷盘，丢弃累积状态
+			checkpointSeq = entry.Seq
+			pending = make(map[uint64]walEntry)
+			committed = make(map[uint64]bool)
+
+		case walPending:
+			if entry.Seq > checkpointSeq {
+				pending[entry.Seq] = entry
+			}
+
+		case walCommitted:
+			if entry.Seq > checkpointSeq {
+				committed[entry.Seq] = true
+			}
+		}
+		return true
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 收集 pending+committed 配对成功的条目
+	var result []walEntry
+	var maxSeq uint64
+	for seq, entry := range pending {
+		if committed[seq] {
+			result = append(result, entry)
+			if seq > maxSeq {
+				maxSeq = seq
+			}
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Seq < result[j].Seq
+	})
+
+	return result, maxSeq, nil
+}
+
+// truncateBefore 截断 WAL，移除 seq <= maxSeq 的所有条目
+func (w *WAL) truncateBefore(maxSeq uint64) error {
+	// 收集需要保留的条目
+	var remaining []walEntry
+	err := w.scanFile(func(entry walEntry) bool {
+		if entry.Seq > maxSeq && entry.Status != walCheckpoint {
+			remaining = append(remaining, entry)
+		}
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("scan for truncate: %w", err)
+	}
+
+	// 刷写 + 关闭当前文件
+	if err := w.writer.Flush(); err != nil {
+		return err
+	}
+	if err := w.file.Close(); err != nil {
+		return err
+	}
+
+	// 重写文件（只保留 checkpoint 之后的条目）
+	f, err := os.Create(w.logPath)
+	if err != nil {
+		return fmt.Errorf("recreate wal: %w", err)
+	}
+
+	writer := bufio.NewWriterSize(f, walBufSize)
+	for _, entry := range remaining {
+		raw, _ := json.Marshal(entry)
+		raw = append(raw, '\n')
+		writer.Write(raw)
+	}
+	if err := writer.Flush(); err != nil {
+		f.Close()
+		return fmt.Errorf("flush remaining: %w", err)
+	}
+
+	w.file = f
+	w.writer = writer
+	return nil
 }

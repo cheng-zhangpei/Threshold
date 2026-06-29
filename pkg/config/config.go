@@ -20,6 +20,7 @@ type ServerConfig struct {
 	Alert         AlertConfig         `yaml:"alert"`
 	TLS           TLSConfig           `yaml:"tls"`
 	DirectConnect DirectConnectConfig `yaml:"direct_connect"` // ← 新增
+	WALDir        string              `yaml:"wal_dir"`        // WAL 日志目录
 
 }
 
@@ -59,10 +60,36 @@ type DispatchConfig struct {
 	HealthCheckIntervalSec int  `yaml:"health_check_interval_sec"`
 }
 
+// FingerprintConfig 指纹匹配配置
 type FingerprintConfig struct {
 	DBPath string `yaml:"db_path"`
+	// 预设模式，不填则逐维度自定义
+	// "strict" = 全部 block（等同于原行为）
+	// "standard" = uuid/os block + ip/port/protocol audit（推荐）
+	// "relaxed" = uuid block + 其余全部 audit
+	// 留空或 "custom" = 用下面 Dimensions 逐项配置
+	MatchMode  string            `yaml:"match_mode"`
+	Dimensions []DimensionPolicy `yaml:"dimensions"` // 自定义逐维度策略
 }
 
+// 标准预设表
+var presetModes = map[string]map[string]string{
+	"strict": {
+		"os": "block", "ip": "block", "port": "block", "protocol": "block",
+	},
+	"standard": {
+		"os": "block", "ip": "audit", "port": "audit", "protocol": "audit",
+	},
+	"relaxed": {
+		"os": "audit", "ip": "audit", "port": "audit", "protocol": "audit",
+	},
+}
+
+// DimensionPolicy 单个维度的匹配策略
+type DimensionPolicy struct {
+	Name   string `yaml:"name"`   // os | ip | port | protocol
+	Action string `yaml:"action"` // block | audit | ignore
+}
 type PortraitConfig struct {
 	Enable       bool   `yaml:"enable"`
 	DBPath       string `yaml:"db_path"`
@@ -156,7 +183,8 @@ func DefaultServerConfig() *ServerConfig {
 			HealthCheckIntervalSec: 5,
 		},
 		Fingerprint: FingerprintConfig{
-			DBPath: "data/fingerprint.db",
+			DBPath:    "data/fingerprint.db",
+			MatchMode: "standard",
 		},
 		Portrait: PortraitConfig{
 			Enable:       true,
@@ -185,6 +213,7 @@ func DefaultServerConfig() *ServerConfig {
 			CertFile:   "certs/server.crt",
 			KeyFile:    "certs/server.key",
 		},
+		WALDir: "./data/wal",
 	}
 }
 

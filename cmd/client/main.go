@@ -55,7 +55,7 @@ func main() {
 	// ============================================================
 	// gRPC 连接：自动检测客户端证书，有则 mTLS，无则降级
 	// ============================================================
-	grpcDialOpts := buildGRPCDialOpts(deviceUUID)
+	grpcDialOpts := buildGRPCDialOpts(cfg, deviceUUID)
 
 	var grpcClient pb.SecurityProxyClient
 	if cfg.Socks5.Enabled {
@@ -113,31 +113,49 @@ func main() {
 	log.Println("Threshold client shutting down...")
 }
 
-// buildGRPCDialOpts 构建 gRPC 连接选项，自动检测证书
-func buildGRPCDialOpts(deviceUUID string) []grpc.DialOption {
-	// 证书路径：优先用设备 UUID 命名的证书
-	clientCertPath := fmt.Sprintf("./data/certs/%s.crt", deviceUUID)
-	clientKeyPath := fmt.Sprintf("./data/certs/%s.key", deviceUUID)
-	caCertPath := "./data/ca/ca.crt"
+// main.go 中替换 buildGRPCDialOpts 函数
+func buildGRPCDialOpts(cfg *configs.ClientConfig, deviceUUID string) []grpc.DialOption {
+	tlsCfg := cfg.TLS
 
-	// 如果设备证书不存在，尝试用默认客户端证书
-	if _, err := os.Stat(clientCertPath); err != nil {
-		clientCertPath = "./data/certs/client.crt"
-		clientKeyPath = "./data/certs/client.key"
+	// ====== none 模式：直接跳过 TLS ======
+	if tlsCfg.Mode == configs.TLSModeNone {
+		log.Println("[Mode 1/2] TLS disabled (tls.mode=none)")
+		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
 
-	if _, err := os.Stat(clientCertPath); err == nil {
-		// mTLS 模式
-		tlsCfg, err := pki.ClientTLSConfig(clientCertPath, clientKeyPath, caCertPath)
-		if err != nil {
-			log.Printf("[WARN] client TLS config failed: %v, falling back to insecure", err)
-			return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	// ====== 确定证书路径（严格模式用配置值，宽容模式保持自动检测） ======
+	caCertPath := tlsCfg.CACert
+	clientCertPath := tlsCfg.ClientCert
+	clientKeyPath := tlsCfg.ClientKey
+
+	if clientCertPath == "" {
+		// 自动检测：优先用设备 UUID 命名的证书，其次用默认证书
+		autoCert := fmt.Sprintf("./data/certs/%s.crt", deviceUUID)
+		autoKey := fmt.Sprintf("./data/certs/%s.key", deviceUUID)
+		if _, err := os.Stat(autoCert); err == nil {
+			clientCertPath = autoCert
+			clientKeyPath = autoKey
+		} else {
+			clientCertPath = "./data/certs/client.crt"
+			clientKeyPath = "./data/certs/client.key"
 		}
-		log.Printf("[Mode 1/2] mTLS enabled (cert=%s)", clientCertPath)
-		return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))}
+	}
+	if caCertPath == "" {
+		caCertPath = "./data/ca/ca.crt"
 	}
 
-	// 降级：无 TLS（开发模式）
-	log.Println("[Mode 1/2] no client cert found, using insecure connection")
+	tlsConfig, err := pki.ClientTLSConfig(caCertPath, clientCertPath, clientKeyPath)
+	if err != nil {
+		// strict 模式下 pki.ClientTLSConfig 已经返回 error
+		log.Fatalf("[FATAL] TLS initialization failed: %v", err)
+	}
+
+	if tlsConfig != nil {
+		log.Printf("[Mode 1/2] mTLS enabled (cert=%s, mode=%s)", clientCertPath, tlsCfg.Mode)
+		return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}
+	}
+
+	// permissive 模式降级到达这里
+	log.Printf("[Mode 1/2] TLS degraded to insecure (mode=%s)", tlsCfg.Mode)
 	return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 }

@@ -17,3 +17,10 @@ socks5:
   listen_addr: "127.0.0.1:1080"
   # user_id 可单独指定，若为空则使用全局 user_id
   # device_uuid 和 os_type 复用全局采集结果，无需重复配置
+
+# ========== TLS 配置（全局生效） ==========
+tls:
+  mode: "strict"                      # strict(如果找不到证书就panic) | permissive(允许密文传输） | none ）
+  ca_cert: "./data/ca/ca.crt"         # CA 证书路径
+  client_cert: "./data/certs/test-device-uuid.crt"                     # 留空则自动按设备UUID或默认路径检测
+  client_key: "./data/certs/test-device-uuid.key"                    # 留空同上

@@ -92,10 +92,23 @@ func (h *Handler) EstablishConnection(ctx context.Context, req *pb.ConnectionIni
 	connIP := req.Ip
 	fp := types.DeviceFingerprint{OS: &req.OsType, IP: &connIP, UUID: &req.DeviceUuid}
 	log.Println(fp)
-	if !h.fpTree.Match(fp) {
-		log.Println("[Blocked] device not registered!")
-		return &pb.ConnectionAck{Accepted: false, Reason: "device not registered"}, nil
+	result := h.fpTree.Match(fp)
+
+	if !result.Matched {
+		if result.Blocked {
+			log.Println("[Blocked] device not registered!")
+			return &pb.ConnectionAck{Accepted: false, Reason: "device was blocked"}, nil
+		}
+		return &pb.ConnectionAck{Accepted: false, Reason: "device was not registered"}, nil
 	}
+	if len(result.AuditDiffs) > 0 {
+		for _, d := range result.AuditDiffs {
+			log.Printf("[AUDIT] UUID=%s %s drift: %s → %s (path=%s)",
+				string(*fp.UUID), d.Dimension,
+				d.Registered, d.Actual, result.MatchPath)
+		}
+	}
+
 	log.Printf("[UnBlocked] device registered: %s", connIP)
 	connID := fmt.Sprintf("conn-%s-%d", req.DeviceUuid[:8], time.Now().UnixMilli())
 	connCtx := &types.ConnectionContext{

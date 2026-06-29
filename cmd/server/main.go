@@ -31,7 +31,7 @@ import (
 
 func main() {
 	var cfgPath string
-	flag.StringVar(&cfgPath, "config", "./config/clients.yaml", "path to client config file")
+	flag.StringVar(&cfgPath, "config", "./config/server.yaml", "path to client config file")
 	flag.Parse()
 
 	cfg, err := config.LoadServerConfig(cfgPath)
@@ -54,21 +54,21 @@ func main() {
 	}
 	defer store.Close()
 
-	wal := storage.NewWAL(store)
-	recovered, _ := wal.Recover()
-	if recovered > 0 {
-		log.Printf("wal recovered %d entries\n", recovered)
+	wal, err := storage.NewWAL(cfg.WALDir)
+	if err != nil {
+		panic("the wal dir is invalid")
 	}
+	wal.StartFlusher(store, 5*time.Second)
 
 	// --- 指纹匹配引擎 ---
-	fpTree, err := fingerprint.NewTree(store, wal)
+	fpTree, err := fingerprint.NewTree(store, wal, cfg.Fingerprint)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fingerprint tree: %v\n", err)
 		os.Exit(1)
 	}
 	waiterInstance := waiter.NewWaiter(30 * time.Second)
 
-	fmt.Printf("fingerprint tree loaded\n%s", fpTree.Print())
+	log.Printf("fingerprint tree is loaded\n%s", fpTree.Print())
 	outputBuf := output.NewOutputBufferWithConfig(
 		cfg.Output.MaxSize,
 		cfg.Output.SenderWorkers,
@@ -133,7 +133,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("init router_v2: %v", err)
 		}
-		fmt.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
+		log.Printf("router started: %d consumers, queue size %d\n", cfg.Router.Consumers, cfg.Router.QueueSize)
 	}
 
 	// ============================================================
@@ -150,9 +150,9 @@ func main() {
 			log.Fatalf("server TLS config: %v", err)
 		}
 		grpcCreds = credentials.NewTLS(tlsCfg)
-		fmt.Println("gRPC server: mTLS enabled")
+		log.Println("gRPC server: mTLS enabled")
 	} else {
-		fmt.Println("gRPC server: no TLS (dev mode)")
+		log.Println("gRPC server: no TLS (dev mode)")
 	}
 
 	// --- gRPC Server ---
@@ -163,7 +163,7 @@ func main() {
 	}
 
 	go func() {
-		fmt.Printf("Threshold gRPC server starting on %s\n", cfg.GRPC.ListenAddr)
+		log.Printf("Threshold gRPC server starting on %s\n", cfg.GRPC.ListenAddr)
 		if err := grpcServer.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "grpc error: %v\n", err)
 			os.Exit(1)
@@ -192,7 +192,7 @@ func main() {
 		)
 
 		go func() {
-			fmt.Printf("Threshold direct-connect starting on %s\n", tcpCfg.ListenAddr)
+			log.Printf("Threshold direct-connect starting on %s\n", tcpCfg.ListenAddr)
 			if err := tcpListener.Start(); err != nil {
 				fmt.Fprintf(os.Stderr, "tcplistener error: %v\n", err)
 				log.Printf("[tcplistener] FAILED: %v", err)

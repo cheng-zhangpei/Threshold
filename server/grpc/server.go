@@ -76,13 +76,13 @@ func New(
 		if err != nil {
 			log.Fatalf("generate passcode: %v", err)
 		}
-		fmt.Println("========================================")
-		fmt.Println("  Admin not initialized.")
-		fmt.Printf("  One-time passcode: %s\n", passcode)
-		fmt.Println("  Run: adminctl init -passcode <code> -user admin -pass <password>")
-		fmt.Println("========================================")
+		log.Println("========================================")
+		log.Println("  Admin not initialized.")
+		log.Printf("  One-time passcode: %s\n", passcode)
+		log.Println("  Run: adminctl init -passcode <code> -user admin -pass <password>")
+		log.Println("========================================")
 	} else {
-		fmt.Println("Admin already initialized.")
+		log.Println("Admin already initialized.")
 	}
 
 	handler := NewHandler(fpTree, engine, r, r2, outputBuf, alertQueue, portraitStore, waiter, dm, adminStore, tokenStore)

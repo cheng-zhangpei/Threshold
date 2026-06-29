@@ -85,10 +85,23 @@ dispatch:
 # 设备指纹匹配引擎配置
 # 职责: 六层 Hash 树存储和匹配设备指纹 (UUID/OS/IP/Port/Protocol/Reserved)
 # ============================================================
+# 标准模式（推荐生产使用）
 fingerprint:
-  # 指纹数据持久化存储路径
-  # 使用 bbolt 存储，重启后指纹数据不丢失
-  db_path: "./data/fingerprint.db"
+  db_path: "data/fingerprint.db"
+  match_mode: "standard"
+# 或者自定义逐维度配置
+# fingerprint:
+#   db_path: "data/fingerprint.db"
+#   match_mode: "custom"
+#   dimensions:
+#     - name: "os"
+#       action: "block"
+#     - name: "ip"
+#       action: "audit"
+#     - name: "port"
+#       action: "ignore"
+#     - name: "protocol"
+#       action: "audit"
 # ============================================================
 # 用户画像存储配置
 # 职责: 维护用户历史行为摘要，供决策引擎使用
@@ -157,3 +170,4 @@ direct_connect:
   cert_file: "./data/certs/server.crt"
   # TLS 私钥文件路径（PEM 格式）
   key_file: "./data/certs/server.key"
+wal_dir: "./data/wal"

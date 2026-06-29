@@ -2,6 +2,7 @@ package tcplistener
 
 import (
 	"Threshold/pkg/types"
+	"Threshold/server/fingerprint"
 	"Threshold/server/portrait"
 	"Threshold/server/router/router_v2"
 	"bufio"
@@ -31,7 +32,7 @@ type Config struct {
 }
 
 type FingerMatcher interface {
-	Match(fp types.DeviceFingerprint) bool
+	Match(fp types.DeviceFingerprint) fingerprint.MatchResult
 }
 
 type AlertSender interface {
@@ -221,13 +222,22 @@ func (l *Listener) handle(conn *tls.Conn) {
 			Protocol: nil,
 			Reserved: nil,
 		}
-		if !l.fp.Match(fp) {
+		result := l.fp.Match(fp)
+
+		if !result.Matched {
 			log.Printf("[tcplistener] FINGERPRINT REJECTED uuid=%s ip=%s", hs.UUID, host)
 			writeRespFrame(conn, StatusBlocked, nil)
 			if l.alert != nil {
 				l.alert.PutSimple(hs.UUID, "mode3 fingerprint mismatch")
 			}
 			return
+		}
+		if len(result.AuditDiffs) > 0 {
+			for _, d := range result.AuditDiffs {
+				log.Printf("[AUDIT] UUID=%s %s drift: %s → %s (path=%s)",
+					string(*fp.UUID), d.Dimension,
+					d.Registered, d.Actual, result.MatchPath)
+			}
 		}
 	}
 
