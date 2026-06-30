@@ -16,19 +16,97 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // ============================================================
 // 配置与接口
 // ============================================================
+const maxLifetime = 30 * time.Minute
+
+// 默认值常量，仅用于 ApplyDefaults 兜底
+const (
+	defaultMaxConns            = 1000
+	defaultMaxPerHost          = 20
+	defaultMaxLifetime         = 30 * time.Minute
+	defaultMaxIdle             = 5 * time.Minute
+	defaultJanitorInterval     = 30 * time.Second
+	defaultDialTimeout         = 5 * time.Second
+	defaultTLSHandshakeTimeout = 10 * time.Second
+	defaultRequestReadTimeout  = 60 * time.Second
+	defaultWriteTimeout        = 10 * time.Second
+	defaultReadTimeout         = 10 * time.Second
+	defaultMaxPayloadSize      = 1 << 20  // 1MB
+	defaultMaxResponseSize     = 10 << 20 // 10MB
+)
 
 type Config struct {
-	Enabled    bool
-	ListenAddr string
-	CertFile   string
-	KeyFile    string
-	CACertFile string
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"`
+	CertFile   string `yaml:"cert_file"`
+	KeyFile    string `yaml:"key_file"`
+	CACertFile string `yaml:"ca_cert_file"`
+
+	// 连接池
+	MaxConns    int           `yaml:"max_conns"`
+	MaxPerHost  int           `yaml:"max_per_host"`
+	MaxLifetime time.Duration `yaml:"max_lifetime"`
+	MaxIdle     time.Duration `yaml:"max_idle"`
+
+	// Janitor
+	JanitorInterval time.Duration `yaml:"janitor_interval"`
+
+	// 超时
+	DialTimeout         time.Duration `yaml:"dial_timeout"`
+	TLSHandshakeTimeout time.Duration `yaml:"tls_handshake_timeout"`
+	RequestReadTimeout  time.Duration `yaml:"request_read_timeout"`
+	WriteTimeout        time.Duration `yaml:"write_timeout"`
+	ReadTimeout         time.Duration `yaml:"read_timeout"`
+
+	// 帧限制
+	MaxPayloadSize  int `yaml:"max_payload_size"`
+	MaxResponseSize int `yaml:"max_response_size"`
+}
+
+// ApplyDefaults 将零值字段填充为默认值
+func (c *Config) ApplyDefaults() {
+	if c.MaxConns == 0 {
+		c.MaxConns = defaultMaxConns
+	}
+	if c.MaxPerHost == 0 {
+		c.MaxPerHost = defaultMaxPerHost
+	}
+	if c.MaxLifetime == 0 {
+		c.MaxLifetime = defaultMaxLifetime
+	}
+	if c.MaxIdle == 0 {
+		c.MaxIdle = defaultMaxIdle
+	}
+	if c.JanitorInterval == 0 {
+		c.JanitorInterval = defaultJanitorInterval
+	}
+	if c.DialTimeout == 0 {
+		c.DialTimeout = defaultDialTimeout
+	}
+	if c.TLSHandshakeTimeout == 0 {
+		c.TLSHandshakeTimeout = defaultTLSHandshakeTimeout
+	}
+	if c.RequestReadTimeout == 0 {
+		c.RequestReadTimeout = defaultRequestReadTimeout
+	}
+	if c.WriteTimeout == 0 {
+		c.WriteTimeout = defaultWriteTimeout
+	}
+	if c.ReadTimeout == 0 {
+		c.ReadTimeout = defaultReadTimeout
+	}
+	if c.MaxPayloadSize == 0 {
+		c.MaxPayloadSize = defaultMaxPayloadSize
+	}
+	if c.MaxResponseSize == 0 {
+		c.MaxResponseSize = defaultMaxResponseSize
+	}
 }
 
 type FingerMatcher interface {
@@ -57,59 +135,218 @@ type Deps struct {
 // ConnPool 连接池：复用到目标服务器的 TCP 连接
 // ============================================================
 
+type pooledConn struct {
+	conn     net.Conn
+	br       *bufio.Reader // 与 conn 绑定，避免预读数据丢失
+	created  time.Time
+	lastUsed time.Time
+}
+
+type hostPool struct {
+	mu    sync.Mutex
+	conns []*pooledConn
+}
 type ConnPool struct {
-	mu sync.Mutex
-	// 所以连接池里就是net包里面封装的conn
-	conns      map[string][]*poolConn
-	maxPerHost int
+	mu         sync.RWMutex
+	hosts      map[string]*hostPool
+	cfg        *Config // ← 改为引用 Config
+	totalConns int32
+	stopOnce   sync.Once
+	stopCh     chan struct{}
+	closed     int32
 }
 
-type poolConn struct {
-	conn    net.Conn
-	created time.Time
-}
-
-func NewConnPool() *ConnPool {
-	return &ConnPool{
-		conns:      make(map[string][]*poolConn),
-		maxPerHost: 20,
+func NewConnPool(cfg *Config) *ConnPool {
+	p := &ConnPool{
+		hosts:  make(map[string]*hostPool),
+		cfg:    cfg,
+		stopCh: make(chan struct{}),
 	}
+	go p.startJanitor()
+	return p
 }
 
-func (p *ConnPool) Get(target string) (net.Conn, error) {
-	p.mu.Lock()
-	conns := p.conns[target]
-	if len(conns) > 0 {
-		pc := conns[len(conns)-1]
-		p.conns[target] = conns[:len(conns)-1]
-		p.mu.Unlock()
+func (p *ConnPool) dial(target string) (*pooledConn, error) {
+	if atomic.LoadInt32(&p.closed) == 1 {
+		return nil, fmt.Errorf("connection pool is closed")
+	}
+	if atomic.LoadInt32(&p.totalConns) >= int32(p.cfg.MaxConns) {
+		return nil, fmt.Errorf("connection pool exhausted (%d/%d)",
+			atomic.LoadInt32(&p.totalConns), p.cfg.MaxConns)
+	}
+	conn, err := net.DialTimeout("tcp", target, p.cfg.DialTimeout) // ← 从 cfg 读
+	if err != nil {
+		return nil, err
+	}
+	atomic.AddInt32(&p.totalConns, 1)
+	now := time.Now()
+	return &pooledConn{
+		conn:     conn,
+		br:       bufio.NewReader(conn),
+		created:  now,
+		lastUsed: now,
+	}, nil
+}
 
-		// 检查连接是否过期（60 秒）
-		if time.Since(pc.created) > 60*time.Second {
-			pc.conn.Close()
-			return p.dial(target)
+func (p *ConnPool) Put(target string, pc *pooledConn) {
+	if atomic.LoadInt32(&p.closed) == 1 {
+		p.closeConn(pc)
+		return
+	}
+
+	hp := p.getHost(target)
+	hp.mu.Lock()
+	defer hp.mu.Unlock()
+
+	if len(hp.conns) >= p.cfg.MaxPerHost { // ← 从 cfg 读
+		p.closeConn(pc)
+		return
+	}
+	pc.lastUsed = time.Now()
+	hp.conns = append(hp.conns, pc)
+}
+
+func (p *ConnPool) cleanup() {
+	p.mu.RLock()
+	targets := make([]string, 0, len(p.hosts))
+	for t := range p.hosts {
+		targets = append(targets, t)
+	}
+	p.mu.RUnlock()
+
+	for _, target := range targets {
+		hp := p.getHost(target)
+		hp.mu.Lock()
+
+		alive := hp.conns[:0]
+		for _, pc := range hp.conns {
+			if time.Since(pc.created) > p.cfg.MaxLifetime || // ← 从 cfg 读
+				time.Since(pc.lastUsed) > p.cfg.MaxIdle || // ← 从 cfg 读
+				!p.isAlive(pc) {
+				p.closeConn(pc)
+				continue
+			}
+			alive = append(alive, pc)
 		}
-		return pc.conn, nil
+		for i := len(alive); i < len(hp.conns); i++ {
+			hp.conns[i] = nil
+		}
+		hp.conns = alive
+
+		hp.mu.Unlock()
 	}
-	p.mu.Unlock()
+}
+
+func (p *ConnPool) startJanitor() {
+	ticker := time.NewTicker(p.cfg.JanitorInterval) // ← 从 cfg 读
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanup()
+		case <-p.stopCh:
+			return
+		}
+	}
+}
+
+func (p *ConnPool) Get(target string) (*pooledConn, error) {
+	if atomic.LoadInt32(&p.closed) == 1 {
+		return nil, fmt.Errorf("connection pool is closed")
+	}
+
+	hp := p.getHost(target)
+
+	hp.mu.Lock()
+	for len(hp.conns) > 0 {
+		pc := hp.conns[len(hp.conns)-1]
+		hp.conns = hp.conns[:len(hp.conns)-1]
+		hp.mu.Unlock()
+
+		if time.Since(pc.created) > p.cfg.MaxLifetime { // ← 从 cfg 读
+			p.closeConn(pc)
+			hp.mu.Lock()
+			continue
+		}
+		if p.isAlive(pc) {
+			if pc.br.Buffered() > 0 {
+				p.closeConn(pc)
+			} else {
+				pc.lastUsed = time.Now()
+				return pc, nil
+			}
+		} else {
+			p.closeConn(pc)
+		}
+
+		hp.mu.Lock()
+	}
+	hp.mu.Unlock()
 
 	return p.dial(target)
 }
 
-func (p *ConnPool) Put(target string, conn net.Conn) {
+// getHost 获取或创建 per-host 连接栈（带 lazy init）
+func (p *ConnPool) getHost(target string) *hostPool {
+	// 快速路径：读锁查找
+	p.mu.RLock()
+	hp, ok := p.hosts[target]
+	p.mu.RUnlock()
+	if ok {
+		return hp
+	}
+
+	// 慢速路径：写锁创建（double-check）
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
-	conns := p.conns[target]
-	if len(conns) >= p.maxPerHost {
-		conn.Close()
-		return
+	hp, ok = p.hosts[target]
+	if !ok {
+		hp = &hostPool{}
+		p.hosts[target] = hp
 	}
-	p.conns[target] = append(conns, &poolConn{conn: conn, created: time.Now()})
+	return hp
 }
 
-func (p *ConnPool) dial(target string) (net.Conn, error) {
-	return net.DialTimeout("tcp", target, 5*time.Second)
+func (p *ConnPool) isAlive(pc *pooledConn) bool {
+
+	pc.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
+	// Peek 不消费字节，只窥探缓冲区和底层连接
+	_, err := pc.br.Peek(1)
+	pc.conn.SetReadDeadline(time.Time{})
+
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return true // 超时 = 连接活着，只是没数据
+		}
+		return false
+	}
+	// Peek 到数据 = 有脏数据，连接不可信
+	return false
+}
+
+// closeConn 统一的连接关闭：关闭 socket + 减少计数
+func (p *ConnPool) closeConn(pc *pooledConn) {
+	pc.conn.Close()
+	atomic.AddInt32(&p.totalConns, -1)
+}
+
+func (p *ConnPool) Close() {
+	p.stopOnce.Do(func() {
+		atomic.StoreInt32(&p.closed, 1) // ← 标记关闭
+		close(p.stopCh)
+	})
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, hp := range p.hosts {
+		hp.mu.Lock()
+		for _, pc := range hp.conns {
+			p.closeConn(pc)
+		}
+		hp.conns = nil
+		hp.mu.Unlock()
+	}
 }
 
 // ============================================================
@@ -117,16 +354,40 @@ func (p *ConnPool) dial(target string) (net.Conn, error) {
 // ============================================================
 
 type Listener struct {
-	cfg   Config
-	fp    FingerMatcher
-	alert AlertSender
-	deps  Deps
-	pool  *ConnPool
+	cfg       Config
+	fp        FingerMatcher
+	alert     AlertSender
+	deps      Deps
+	pool      *ConnPool
+	ln        net.Listener
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	sem       chan struct{}
 }
 
 func New(cfg Config, fp FingerMatcher, alert AlertSender, deps Deps) *Listener {
-	return &Listener{cfg: cfg, fp: fp, alert: alert, deps: deps, pool: NewConnPool()}
+	cfg.ApplyDefaults() // ← 入口兜底
+
+	return &Listener{
+		cfg:     cfg,
+		fp:      fp,
+		alert:   alert,
+		deps:    deps,
+		pool:    NewConnPool(&cfg),
+		closeCh: make(chan struct{}),
+		sem:     make(chan struct{}, cfg.MaxConns),
+	}
 }
+func (l *Listener) Close() {
+	l.closeOnce.Do(func() {
+		close(l.closeCh)
+		if l.ln != nil {
+			l.ln.Close()
+		}
+		l.pool.Close()
+	})
+}
+
 func (l *Listener) Start() error {
 	cert, err := tls.LoadX509KeyPair(l.cfg.CertFile, l.cfg.KeyFile)
 	if err != nil {
@@ -161,6 +422,7 @@ func (l *Listener) Start() error {
 	if err != nil {
 		return fmt.Errorf("tls listen on %s: %w", l.cfg.ListenAddr, err)
 	}
+	l.ln = ln
 	defer ln.Close()
 
 	log.Printf("[tcplistener] listening on %s (TLS)", l.cfg.ListenAddr)
@@ -168,10 +430,27 @@ func (l *Listener) Start() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("[tcplistener] accept error: %v", err)
-			continue
+			select {
+			case <-l.closeCh:
+				log.Printf("[tcplistener] shutting down")
+				return nil
+			default:
+				log.Printf("[tcplistener] accept error: %v", err)
+				continue
+			}
 		}
-		go l.handle(conn.(*tls.Conn))
+
+		// 并发连接数控制
+		select {
+		case l.sem <- struct{}{}: // 拿到令牌，继续
+			go func() {
+				defer func() { <-l.sem }() // 处理完归还令牌
+				l.handle(conn.(*tls.Conn))
+			}()
+		default: // 令牌池满，拒绝连接
+			conn.Close()
+			log.Printf("[tcplistener] connection rejected: at capacity")
+		}
 	}
 }
 
@@ -181,28 +460,23 @@ func (l *Listener) Start() error {
 
 func (l *Listener) handle(conn *tls.Conn) {
 	defer conn.Close()
+
+	// TLS 握手 + 首帧超时 ← 从 cfg 读
+	conn.SetDeadline(time.Now().Add(l.cfg.TLSHandshakeTimeout))
+
 	if err := conn.Handshake(); err != nil {
 		log.Printf("[tcplistener] TLS handshake failed: %v", err)
 		return
 	}
 	remote := conn.RemoteAddr().String()
-	/*
-	 * TLS 握手只是建立了加密通道
-	 * 但还不知道对方是谁、想连哪里
-	 *
-	 * 所以接下来要读一个"握手包"（对应客户端的 handshake_send）
-	 *
-	 * readFrame 是什么？
-	 *   从 TLS 连接里读取一帧数据
-	 *   帧格式：[状态码 1字节][数据长度 4字节][数据内容 N字节]
-	 *   这是项目自定义的协议，不是 HTTP，不是 WebSocket
-	 */
-	// ② 读取握手包
-	raw, err := readFrame(conn)
+
+	raw, err := readFrame(conn, l.cfg.MaxPayloadSize)
 	if err != nil {
 		log.Printf("[tcplistener] read handshake: %v", err)
 		return
 	}
+	conn.SetDeadline(time.Time{})
+
 	hs, err := parseHandshake(raw)
 	if err != nil {
 		log.Printf("[tcplistener] parse handshake: %v", err)
@@ -248,21 +522,24 @@ func (l *Listener) handle(conn *tls.Conn) {
 	 * 此时客户端的 handshake_send 会收到 STATUS_OK
 	 * connect() 函数返回 0，应用以为连接成功
 	 */
+	conn.SetWriteDeadline(time.Now().Add(l.cfg.WriteTimeout)) // ← 从 cfg 读
 	if err := writeRespFrame(conn, StatusOK, nil); err != nil {
 		return
 	}
+	conn.SetWriteDeadline(time.Time{})
 
 	connID := fmt.Sprintf("mode3-%s-%d", hs.UUID, time.Now().UnixNano())
 	log.Printf("[tcplistener] session: connID=%s uuid=%s → %s", connID, hs.UUID, hs.Target)
 
-	// ⑤ 请求循环
+	// 请求循环
 	for {
-		reqData, err := readFrame(conn)
+		conn.SetReadDeadline(time.Now().Add(l.cfg.RequestReadTimeout)) // ← 从 cfg 读
+		reqData, err := readFrame(conn, l.cfg.MaxPayloadSize)
+		conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			log.Printf("[tcplistener] session end: connID=%s err=%v", connID, err)
 			return
 		}
-		// 将每一个握手包去进行路由，路由的过程中，需要使用决策引擎去进行分析
 		l.secureRoute(conn, connID, hs.UUID, hs.Target, remote, reqData)
 	}
 }
@@ -324,65 +601,73 @@ func (l *Listener) secureRoute(conn *tls.Conn, connID, deviceUUID, target, remot
 // ============================================================
 // forwardWithPool 用连接池转发请求
 // ============================================================
-
+// ============================================================
+// forwardWithPool 用连接池转发请求
+// ============================================================
 func (l *Listener) forwardWithPool(conn *tls.Conn, target string, reqData []byte) {
-	// 从连接池获取连接
-	targetConn, err := l.pool.Get(target)
+	pc, err := l.pool.Get(target)
 	if err != nil {
-		log.Printf("[tcplistener] pool get error: %v", err)
+		log.Printf("[tcplistener] dial %s: %v", target, err)
 		writeRespFrame(conn, StatusBlocked, nil)
 		return
 	}
 
-	// 发送请求
-	targetConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if _, err := targetConn.Write(reqData); err != nil {
-		targetConn.Close()
-		// 重试一次
-		targetConn, err = l.pool.Get(target)
+	respBytes, err := l.doRoundTrip(pc, reqData)
+	if err != nil {
+		// 第一次失败：连接可能已死，关闭后重试一次
+		l.pool.closeConn(pc) // ← 统一走 closeConn
+
+		pc, retryErr := l.pool.Get(target)
+		if retryErr != nil {
+			log.Printf("[tcplistener] retry dial %s: %v", target, retryErr)
+			writeRespFrame(conn, StatusBlocked, nil)
+			return
+		}
+		respBytes, err = l.doRoundTrip(pc, reqData)
 		if err != nil {
+			l.pool.closeConn(pc) // ← 统一走 closeConn
+			log.Printf("[tcplistener] retry failed %s: %v", target, err)
 			writeRespFrame(conn, StatusBlocked, nil)
 			return
 		}
-		if _, err := targetConn.Write(reqData); err != nil {
-			targetConn.Close()
-			writeRespFrame(conn, StatusBlocked, nil)
-			return
-		}
 	}
 
-	// 用 http.ReadResponse 正确解析 HTTP 响应
-	targetConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	br := bufio.NewReader(targetConn)
-	resp, err := http.ReadResponse(br, nil)
+	writeRespFrame(conn, StatusOK, respBytes)
+	l.pool.Put(target, pc)
+}
+
+func strPtr(s string) *string {
+	return &s
+}
+
+const MaxResponseSize = 10 << 20 // 10MB
+
+func (l *Listener) doRoundTrip(pc *pooledConn, reqData []byte) ([]byte, error) {
+	pc.conn.SetWriteDeadline(time.Now().Add(l.cfg.WriteTimeout)) // ← 从 cfg 读
+	if _, err := pc.conn.Write(reqData); err != nil {
+		return nil, fmt.Errorf("write: %w", err)
+	}
+
+	pc.conn.SetReadDeadline(time.Now().Add(l.cfg.ReadTimeout)) // ← 从 cfg 读
+	resp, err := http.ReadResponse(pc.br, nil)
 	if err != nil {
-		targetConn.Close()
-		writeRespFrame(conn, StatusBlocked, nil)
-		return
+		return nil, fmt.Errorf("read response: %w", err)
 	}
+	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(l.cfg.MaxResponseSize+1))) // ← 从 cfg 读
 	if err != nil {
-		targetConn.Close()
-		writeRespFrame(conn, StatusBlocked, nil)
-		return
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if len(body) > l.cfg.MaxResponseSize { // ← 从 cfg 读
+		return nil, fmt.Errorf("response too large: %d bytes (limit %d)", len(body), l.cfg.MaxResponseSize)
 	}
 
-	// 重建完整 HTTP 响应字节
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "%s %s\r\n", resp.Proto, resp.Status)
 	resp.Header.Write(&buf)
 	buf.WriteString("\r\n")
 	buf.Write(body)
-	respBytes := buf.Bytes()
 
-	writeRespFrame(conn, StatusOK, respBytes)
-
-	// 连接放回池里复用
-	l.pool.Put(target, targetConn)
-}
-
-func strPtr(s string) *string {
-	return &s
+	return buf.Bytes(), nil
 }

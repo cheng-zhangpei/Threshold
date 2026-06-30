@@ -34,13 +34,13 @@ type Handshake struct {
 
 // readFrame 读取客户端发来的帧: [4字节BE长度][payload]
 // 用于读取握手包和后续请求帧（两者格式相同）
-func readFrame(r io.Reader) ([]byte, error) {
+func readFrame(r io.Reader, maxPayloadSize int) ([]byte, error) {
 	var n uint32
 	if err := binary.Read(r, binary.BigEndian, &n); err != nil {
 		return nil, fmt.Errorf("read frame length: %w", err)
 	}
-	if n > MaxPayloadSize {
-		return nil, fmt.Errorf("payload too large: %d bytes", n)
+	if n > uint32(maxPayloadSize) {
+		return nil, fmt.Errorf("payload too large: %d bytes (limit %d)", n, maxPayloadSize)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {

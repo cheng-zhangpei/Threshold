@@ -39,6 +39,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load configs: %v\n", err)
 		os.Exit(1)
 	}
+	PrintServerConfig(cfg)
 	file, err := os.OpenFile("./log/server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal(err)
@@ -174,12 +175,34 @@ func main() {
 	//  Mode 3: 直连模式 (Direct Connect)
 	// ═══════════════════════════════════════════════════════
 	if cfg.DirectConnect.Enabled {
+		dc := cfg.DirectConnect
+
 		tcpCfg := tcplistener.Config{
-			Enabled:    cfg.DirectConnect.Enabled,
-			ListenAddr: cfg.DirectConnect.ListenAddr,
-			CertFile:   cfg.DirectConnect.CertFile,
-			KeyFile:    cfg.DirectConnect.KeyFile,
-			CACertFile: "./data/ca/ca.crt", // 指定一下证书的位置
+			Enabled:    dc.Enabled,
+			ListenAddr: dc.ListenAddr,
+			CertFile:   dc.CertFile,
+			KeyFile:    dc.KeyFile,
+			CACertFile: "./data/ca/ca.crt",
+
+			// 连接池
+			MaxConns:    dc.MaxConns,
+			MaxPerHost:  dc.MaxPerHost,
+			MaxLifetime: config.ParseDuration(dc.MaxLifetime, 30*time.Minute),
+			MaxIdle:     config.ParseDuration(dc.MaxIdle, 5*time.Minute),
+
+			// 清理
+			JanitorInterval: config.ParseDuration(dc.JanitorInterval, 30*time.Second),
+
+			// 超时
+			DialTimeout:         config.ParseDuration(dc.DialTimeout, 5*time.Second),
+			TLSHandshakeTimeout: config.ParseDuration(dc.TLSHandshakeTimeout, 10*time.Second),
+			RequestReadTimeout:  config.ParseDuration(dc.RequestReadTimeout, 60*time.Second),
+			WriteTimeout:        config.ParseDuration(dc.WriteTimeout, 10*time.Second),
+			ReadTimeout:         config.ParseDuration(dc.ReadTimeout, 10*time.Second),
+
+			// 帧限制
+			MaxPayloadSize:  dc.MaxPayloadSize,
+			MaxResponseSize: dc.MaxResponseSize,
 		}
 
 		tcpListener := tcplistener.New(
@@ -208,4 +231,133 @@ func main() {
 	<-quit
 	fmt.Println("Threshold server shutting down...")
 	grpcServer.GracefulStop()
+}
+
+func PrintServerConfig(cfg *config.ServerConfig) {
+	dc := cfg.DirectConnect
+
+	banner := `
+╔══════════════════════════════════════════════════════════════╗
+║             Threshold Server - Configuration                 ║
+╚══════════════════════════════════════════════════════════════╝`
+
+	fmt.Println(banner)
+
+	// gRPC
+	printSection("gRPC Layer", []kv{
+		{"Listen Addr", cfg.GRPC.ListenAddr},
+		{"Rate Limit", fmt.Sprintf("%d req/s", cfg.GRPC.RateLimit)},
+		{"Bucket Size", fmt.Sprintf("%d", cfg.GRPC.BucketSize)},
+	})
+
+	// Router
+	printSection("Router", []kv{
+		{"Enabled", fmt.Sprintf("%v", cfg.Router.Enabled)},
+		{"V2 Rules File", cfg.Router.R2Config},
+		{"Consumers", fmt.Sprintf("%d", cfg.Router.Consumers)},
+		{"Queue Size", fmt.Sprintf("%d", cfg.Router.QueueSize)},
+	})
+
+	// Dispatch
+	printSection("Dispatch", []kv{
+		{"Enabled", fmt.Sprintf("%v", cfg.Dispatch.Enabled)},
+		{"Worker Range", fmt.Sprintf("[%d, %d]", cfg.Dispatch.MinWorkers, cfg.Dispatch.MaxWorkers)},
+		{"ScaleUp Threshold", fmt.Sprintf("%d", cfg.Dispatch.ScaleUpThreshold)},
+		{"Max Queue Size", fmt.Sprintf("%d", cfg.Dispatch.MaxQueueSize)},
+	})
+
+	// Fingerprint
+	printSection("Fingerprint Engine", []kv{
+		{"DB Path", cfg.Fingerprint.DBPath},
+		{"Match Mode", cfg.Fingerprint.MatchMode},
+	})
+
+	// Portrait
+	printSection("Portrait Engine", []kv{
+		{"Enabled", fmt.Sprintf("%v", cfg.Portrait.Enable)},
+		{"DB Path", cfg.Portrait.DBPath},
+		{"History Limit", fmt.Sprintf("%d", cfg.Portrait.HistoryLimit)},
+	})
+
+	// Output
+	printSection("Output Layer", []kv{
+		{"Buffer Size", fmt.Sprintf("%d", cfg.Output.MaxSize)},
+		{"Sender Enabled", fmt.Sprintf("%v", cfg.Output.SenderEnable)},
+		{"Sender Workers", fmt.Sprintf("%d", cfg.Output.SenderWorkers)},
+		{"Sender Queue Size", fmt.Sprintf("%d", cfg.Output.SenderQueueSize)},
+	})
+
+	// TLS (gRPC)
+	printSection("gRPC TLS", []kv{
+		{"Enabled", fmt.Sprintf("%v", cfg.TLS.Enabled)},
+		{"Cert File", cfg.TLS.CertFile},
+		{"CA File", cfg.TLS.CAFile},
+		{"Client Auth", fmt.Sprintf("%v", cfg.TLS.RequireClientAuth)},
+	})
+
+	// Mode 3: Direct Connect
+	printSection("Mode 3 Direct Connect", []kv{
+		{"Enabled", fmt.Sprintf("%v", dc.Enabled)},
+		{"Listen Addr", dc.ListenAddr},
+		{"Cert File", dc.CertFile},
+		{"CA File", "./data/ca/ca.crt"},
+		{"", ""},
+		{"Max Conns", fmt.Sprintf("%d", dc.MaxConns)},
+		{"Max Per Host", fmt.Sprintf("%d", dc.MaxPerHost)},
+		{"Max Lifetime", dc.MaxLifetime},
+		{"Max Idle", dc.MaxIdle},
+		{"Janitor Interval", dc.JanitorInterval},
+		{"", ""},
+		{"Dial Timeout", dc.DialTimeout},
+		{"TLS Handshake Timeout", dc.TLSHandshakeTimeout},
+		{"Request Read Timeout", dc.RequestReadTimeout},
+		{"Write Timeout", dc.WriteTimeout},
+		{"Read Timeout", dc.ReadTimeout},
+		{"", ""},
+		{"Max Payload Size", fmtSize(dc.MaxPayloadSize)},
+		{"Max Response Size", fmtSize(dc.MaxResponseSize)},
+	})
+
+	// WAL
+	printSection("Storage", []kv{
+		{"WAL Dir", cfg.WALDir},
+	})
+
+	fmt.Println("════════════════════════════════════════════════════════════")
+}
+
+// ============================================================
+// helpers
+// ============================================================
+
+type kv struct {
+	key string
+	val string
+}
+
+func printSection(title string, items []kv) {
+	fmt.Printf("\n  ┌─ %s\n", title)
+	for _, item := range items {
+		if item.key == "" && item.val == "" {
+			fmt.Println("  │")
+			continue
+		}
+		if item.val == "" {
+			fmt.Printf("  │  %-24s  (not set)\n", item.key)
+		} else {
+			fmt.Printf("  │  %-24s  %s\n", item.key, item.val)
+		}
+	}
+	fmt.Println("  └──────────────────────────────────────────")
+}
+
+func fmtSize(bytes int) string {
+	switch {
+	case bytes >= 1<<20:
+		return fmt.Sprintf("%d MB (%d bytes)", bytes>>20, bytes)
+	case bytes >= 1<<10:
+		return fmt.Sprintf("%d KB (%d bytes)", bytes>>10, bytes)
+	default:
+		return fmt.Sprintf("%d bytes", bytes)
+	}
 }

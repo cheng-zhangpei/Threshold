@@ -1,7 +1,9 @@
 package config
 
 import (
+	"log"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,10 +32,30 @@ type ServerConfig struct {
 // ============
 
 type DirectConnectConfig struct {
-	Enabled    bool   `yaml:"enabled"`     // 是否启用直连模式
-	ListenAddr string `yaml:"listen_addr"` // 监听地址，如 ":9999"
-	CertFile   string `yaml:"cert_file"`   // TLS 证书文件路径（PEM 格式）
-	KeyFile    string `yaml:"key_file"`    // TLS 私钥文件路径（PEM 格式）
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"`
+	CertFile   string `yaml:"cert_file"`
+	KeyFile    string `yaml:"key_file"`
+
+	// 连接池
+	MaxConns    int    `yaml:"max_conns"`
+	MaxPerHost  int    `yaml:"max_per_host"`
+	MaxLifetime string `yaml:"max_lifetime"` // YAML 里用字符串 "30m"，加载时解析
+	MaxIdle     string `yaml:"max_idle"`
+
+	// 清理
+	JanitorInterval string `yaml:"janitor_interval"`
+
+	// 超时
+	DialTimeout         string `yaml:"dial_timeout"`
+	TLSHandshakeTimeout string `yaml:"tls_handshake_timeout"`
+	RequestReadTimeout  string `yaml:"request_read_timeout"`
+	WriteTimeout        string `yaml:"write_timeout"`
+	ReadTimeout         string `yaml:"read_timeout"`
+
+	// 帧限制
+	MaxPayloadSize  int `yaml:"max_payload_size"`
+	MaxResponseSize int `yaml:"max_response_size"`
 }
 type OutputConfig struct {
 	MaxSize         int  `yaml:"max_size"`          // Pull 队列最大容量
@@ -207,11 +229,23 @@ func DefaultServerConfig() *ServerConfig {
 			CAFile:            "",
 			RequireClientAuth: false,
 		},
-		DirectConnect: DirectConnectConfig{ // ← 新增
-			Enabled:    false,
-			ListenAddr: ":9999",
-			CertFile:   "certs/server.crt",
-			KeyFile:    "certs/server.key",
+		DirectConnect: DirectConnectConfig{
+			Enabled:             false,
+			ListenAddr:          ":9999",
+			CertFile:            "certs/server.crt",
+			KeyFile:             "certs/server.key",
+			MaxConns:            1000,
+			MaxPerHost:          20,
+			MaxLifetime:         "30m",
+			MaxIdle:             "5m",
+			JanitorInterval:     "30s",
+			DialTimeout:         "5s",
+			TLSHandshakeTimeout: "10s",
+			RequestReadTimeout:  "60s",
+			WriteTimeout:        "10s",
+			ReadTimeout:         "10s",
+			MaxPayloadSize:      1 << 20,  // 1MB
+			MaxResponseSize:     10 << 20, // 10MB
 		},
 		WALDir: "./data/wal",
 	}
@@ -230,4 +264,17 @@ func DefaultClientConfig() *ClientConfig {
 			Enabled: false,
 		},
 	}
+}
+
+// ParseDuration 解析时间字符串，空字符串或解析失败返回默认值
+func ParseDuration(s string, defaultVal time.Duration) time.Duration {
+	if s == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		log.Printf("WARN: invalid duration %q, using default %v", s, defaultVal)
+		return defaultVal
+	}
+	return d
 }
