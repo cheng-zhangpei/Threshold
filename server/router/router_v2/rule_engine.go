@@ -77,7 +77,7 @@ func (e *RuleEngine) Match(parsed *types.ParsedRequest) RiskLevel {
 		}
 
 		// 命中
-		log.Printf("[RouterV2] rule %s matched: %s %s -> %s",
+		log.Printf("[RouterV2] rule %s matched: %s %s -> %v",
 			rule.ID, method, path, rule.RiskLevel)
 		return rule.RiskLevel
 	}

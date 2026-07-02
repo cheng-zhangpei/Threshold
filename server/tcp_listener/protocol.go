@@ -19,6 +19,7 @@ const (
 	StatusOK      byte = 0x00
 	StatusBlocked byte = 0x01
 	StatusLimited byte = 0x02
+	StatusError   byte = 0x03 // 网络/上游错误（区别于安全阻断）
 
 	MaxPayloadSize = 1 << 20 // 1MB
 )
